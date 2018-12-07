@@ -1,0 +1,205 @@
+---
+title: "AF Impact Report subject line testing"
+output:
+  html_notebook:
+    code_folding: hide
+---
+
+# Libraries
+
+```{r setup, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(readxl)
+library(splines)
+```
+
+# Import data
+
+```{r}
+filepath <- '2018-12-07 Impact Report open click data.xlsx'
+
+recipients <- read_xlsx(
+  path = filepath
+  , sheet = 'With'
+) %>% mutate_if(
+  # Replace 0
+  is.numeric, replace_na, replace = 0
+) %>% mutate(
+  # Column data types
+  FIRST_KSM_YEAR = as.numeric(FIRST_KSM_YEAR)
+  , PROGRAM_GROUP = factor(PROGRAM_GROUP) %>% relevel(ref = 'FT')
+  , KLC_CURRENT = !is.na(KLC_CURRENT)
+  , KLC_LYBUNT = !is.na(KLC_LYBUNT)
+  , AF_STATUS_FY_START = factor(AF_STATUS_FY_START) %>% relevel(ref = 'Lapsed/Non')
+  , n = 1
+) %>% mutate(
+  # Derived variables
+  # Any opens or clicks
+  DID_OPEN = ifelse(OPENS > 0, TRUE, FALSE)
+  , DID_CLICK = ifelse(IMPACT_REPORT_CLICKS > 0, TRUE, FALSE)
+  # Decade
+  , DECADE = {FIRST_KSM_YEAR/10} %>% floor()
+    , DECADE = DECADE * 10
+  # AF segment
+  , AF_SEG = case_when(
+    str_detect(AF_GIVING_SEGMENT, 'Loyal 3+') ~ 'Loyal3+'
+    , str_detect(AF_GIVING_SEGMENT, 'Loyal') ~ 'Loyal2'
+    , TRUE ~ AF_STATUS
+  ) %>% factor()
+    %>% relevel(ref = 'Lapsed/Non')
+  # Subject line factors
+  , HAS_KSM = if_else(str_detect(str_to_lower(EMAIL_SUBJECT), 'kellogg'), TRUE, FALSE)
+  , HAS_YOUR = ifelse(str_detect(str_to_lower(EMAIL_SUBJECT), 'your'), TRUE, FALSE)
+  , IS_SHORT = ifelse(str_count(EMAIL_SUBJECT, ' ') < 3, TRUE, FALSE)
+)
+```
+
+# Exploration
+
+Check that I categorized the subject lines correctly.
+
+```{r}
+# Check the email factors were correctly assigned
+recipients %>% group_by(EMAIL_SUBJECT) %>%
+  summarise(`Has KSM` = max(HAS_KSM), `Has your` = max(HAS_YOUR), `Is short` = max(IS_SHORT))
+```
+
+Good.
+
+Check that there are no systematic differences between which groups received each subject line. (This was already done via block randomization but is verified below.)
+
+```{r}
+# Subject line by program
+recipients %>% xtabs(n ~ EMAIL_SUBJECT + PROGRAM_GROUP, data = .)
+```
+
+Good.
+
+```{r}
+# Subject line by decade
+recipients %>% xtabs(n ~ EMAIL_SUBJECT + DECADE, data = .)
+```
+
+Still good.
+
+```{r}
+# Subject line by AF segment
+recipients %>% xtabs(n ~ EMAIL_SUBJECT + AF_SEG, data = .)
+```
+
+Still good.
+
+Look at the summary statistics for each subject line.
+
+```{r}
+# Overall stats  by subject line
+recipients %>% group_by(EMAIL_SUBJECT) %>%
+  summarise(
+    recipients = length(MSG_ID)
+    , `total opens` = sum(OPENS)
+    , `total clicks` = sum(TOTAL_CLICKS)
+    , `open rate` = mean(DID_OPEN) %>% scales::percent()
+    , `click rate` = mean(DID_CLICK) %>% scales::percent()
+  ) %>% rbind(
+    c(
+      EMAIL_SUBJECT = 'TOTAL'
+      , recipients = nrow(recipients)
+      , `total opens` = sum(recipients$OPENS)
+      , `total clicks` = sum(recipients$TOTAL_CLICKS)
+      , `open rate` = mean(recipients$DID_OPEN) %>% scales::percent()
+      , `click rate` = mean(recipients$DID_CLICK) %>% scales::percent()
+    )
+  ) %>% rename(
+    `email subject` = EMAIL_SUBJECT
+  )
+```
+
+Eyeballing this, it looks like including "Kellogg" decreases click rates but this needs to be tested.
+
+# Exploratory classification model
+
+Consider a standard binary logistic regression model, where the response variable is DID_OPEN (i.e. people who didn't open the email are coded as 0, and people who opened the email 1+ times are coded as 1), and we're interested in the effect of the three factors of interest (short versus long, Kellogg versus no Kellogg, your versus no your) after controlling for the various demographic variables.
+
+```{r}
+glmod <- glm(
+  DID_OPEN ~
+    HAS_KSM * HAS_YOUR * IS_SHORT
+    + AF_SEG + AF_STATUS_FY_START + KLC_LYBUNT + KLC_CURRENT
+    + PROGRAM_GROUP + ns(FIRST_KSM_YEAR, df = 5)
+  , data = recipients
+  , family = binomial
+)
+```
+
+```{r}
+summary(glmod)
+```
+
+The following appears to be the case:
+
+  * Including "Kellogg" in the subject line reduces the open rate on average
+  * Including "Your" in the subject line reduces the open rate on average
+  * There is no main effect associated with short versus long subject lines
+  * There is no evidence for two-way or three-way interaction effects on the open rate
+  * KLC status (current and previous year) is associated with increased open rate
+  * First KSM year is nonlinearly associated with open rate
+  
+I doubt there is enough data to see much of interest with clicks.
+
+```{r}
+glmod %>% update(DID_CLICK ~ ., data = recipients) %>% summary()
+```
+
+  * Including "Your" is also associated with fewer clicks
+  * Last year's KLC donors are somewhat more likely to click
+  * Part-time alumni are somewhat less likely to click
+
+Finally, consider the model without interaction effects.
+
+```{r}
+glmod %>%
+  update(. ~ . - HAS_KSM * HAS_YOUR * IS_SHORT + HAS_KSM + HAS_YOUR + IS_SHORT, data = recipients) %>%
+  summary()
+```
+
+This is essentially the same AIC as the model with interactions.
+  
+# Model calibration results
+
+```{r}
+# Nonpenalized data frame
+data.frame(
+    class = recipients$DID_OPEN + 0
+  , prediction = predict(glmod, type = 'response')
+) %>%
+# Plot results
+ggplot(aes(x = prediction, y = class)) +
+  geom_point(aes(color = as.factor(class))) +
+  geom_smooth(method = 'loess') +
+  geom_abline(slope = 1, intercept = 0) +
+  labs(title = 'Loess smoother on predicted open rate', color = 'class') +
+  xlim(c(0,1))
+```
+
+That's an outstanding result.
+
+# Class year effects
+
+```{r}
+data.frame(
+  FIRST_KSM_YEAR = recipients$FIRST_KSM_YEAR
+  , y.partial.resid = residuals(glmod, type = 'partial')[, 'ns(FIRST_KSM_YEAR, df = 5)']
+  , class = as.factor(recipients$DID_OPEN + 0)
+) %>%
+  ggplot(aes(x = FIRST_KSM_YEAR, y = y.partial.resid)) +
+  geom_point(aes(color = class, fill = class), alpha = .1, size = 1) +
+  geom_hline(yintercept = 0, color = 'darkgray') +
+  geom_smooth(method = 'loess') +
+  scale_x_continuous(breaks = seq(0, 3000, by = 10)) +
+  scale_y_continuous(breaks = seq(-10, 10, by = 2)) +
+  labs(title = 'First KSM year spline versus partial residuals for email open classification'
+       , x = 'First KSM year'
+       , y = 'partial residuals')
+```
+
+This is exactly as expected -- all else equal, younger alums are more likely to open the email than older ones.

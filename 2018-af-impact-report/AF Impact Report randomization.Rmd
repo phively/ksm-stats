@@ -1,0 +1,110 @@
+---
+title: "AF Impact Report randomization"
+output: html_notebook
+---
+
+# Libraries
+
+```{r setup, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(readxl)
+library(randomizr)
+```
+
+
+# Import data
+
+```{r}
+filepath <- 'Annual Fund Impact Report Email List.xlsx'
+
+participation <- read_xlsx(
+  path = filepath
+  , sheet = 'Participation'
+)
+
+klc <- read_xlsx(
+  path = filepath
+  , sheet = 'KLC'
+)
+
+data <- rbind(participation, klc) %>%
+  select(ID, PROG1, YEAR1)
+remove(participation, klc)
+```
+
+# Transform data
+
+```{r}
+data <- data %>%
+  mutate(
+    DECADE = {as.numeric(YEAR1)/10} %>% floor()
+    , DECADE = DECADE * 10
+    , PRG = str_extract(PROG1, pattern = '.*(?=-)')
+    , PRG = ifelse(is.na(PRG), PROG1, PRG) %>% factor()
+    , n = 1
+  )
+```
+
+# Exploration
+
+```{r}
+data %>% xtabs(n ~ DECADE + PRG, data = .)
+```
+
+Hypotheses:
+
+  * Older alumni interact with email differently than younger ones.
+  * FT alumni interact with KSM emails differently than others.
+
+  - One block could be 1930-1960, all programs
+  - Another block for 1970
+  - Two blocks for the other decades: FT, and everyone else
+  - 10 blocks total
+
+# Block randomization
+
+```{r}
+data <- data %>% mutate(
+  block = case_when(
+    DECADE <= 1960 ~ 1
+    , DECADE == 1970 ~ 2
+    , DECADE == 1980 & PRG == 'FT' ~ 3
+    , DECADE == 1980 ~ 4
+    , DECADE == 1990 & PRG == 'FT' ~ 5
+    , DECADE == 1990 ~ 6
+    , DECADE == 2000 & PRG == 'FT' ~ 7
+    , DECADE == 2000 ~ 8
+    , DECADE == 2010 & PRG == 'FT' ~ 9
+    , DECADE == 2010 ~ 10
+  )
+)
+```
+
+```{r}
+data %>% xtabs(n ~ DECADE + PRG + block, data = .)
+```
+
+Looks fine.
+
+# Block randomization
+
+```{r}
+set.seed(1001931)
+conds <- as.character(1:8)
+data$randomized <- with(data
+  , block_ra(block, conditions = conds)
+)
+```
+
+Check results.
+
+```{r}
+data %>% xtabs(n ~ block + randomized, data = .)
+```
+
+# Export
+
+```{r}
+write.csv(data, file = 'randomized.csv', row.names = FALSE)
+```
+
