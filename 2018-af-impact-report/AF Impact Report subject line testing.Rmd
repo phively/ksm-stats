@@ -114,7 +114,7 @@ recipients %>% group_by(EMAIL_SUBJECT) %>%
   )
 ```
 
-Eyeballing this, it looks like including "Kellogg" decreases click rates but this needs to be tested.
+Note that total opens and total clicks may count multiple interactions from a single individual, but the rates are deduped. Eyeballing this, it looks like including "Kellogg" decreases open rates but this needs to be tested.
 
 # Exploratory classification model
 
@@ -154,7 +154,7 @@ glmod %>% update(DID_CLICK ~ ., data = recipients) %>% summary()
   * Last year's KLC donors are somewhat more likely to click
   * Part-time alumni are somewhat less likely to click
 
-Finally, consider the model without interaction effects.
+Next, consider the model without interaction effects.
 
 ```{r}
 glmod %>%
@@ -163,11 +163,28 @@ glmod %>%
 ```
 
 This is essentially the same AIC as the model with interactions.
-  
+
+Finally, consider a reduced model without 3-way interactions and the non-impactful variables.
+
+```{r}
+glmod_reduced <- glm(
+  DID_OPEN ~
+    HAS_KSM * HAS_YOUR * IS_SHORT - HAS_KSM:HAS_YOUR:IS_SHORT
+    + KLC_LYBUNT + KLC_CURRENT
+    + PROGRAM_GROUP + ns(FIRST_KSM_YEAR, df = 5)
+  , data = recipients
+  , family = binomial
+)
+```
+```{r}
+summary(glmod_reduced)
+```
+
+Message length is significant only when the interaction terms are excluded.
+
 # Model calibration results
 
 ```{r}
-# Nonpenalized data frame
 data.frame(
     class = recipients$DID_OPEN + 0
   , prediction = predict(glmod, type = 'response')
@@ -182,6 +199,22 @@ ggplot(aes(x = prediction, y = class)) +
 ```
 
 That's an outstanding result.
+
+```{r}
+data.frame(
+    class = recipients$DID_OPEN + 0
+  , prediction = predict(glmod_reduced, type = 'response')
+) %>%
+# Plot results
+ggplot(aes(x = prediction, y = class)) +
+  geom_point(aes(color = as.factor(class))) +
+  geom_smooth(method = 'loess') +
+  geom_abline(slope = 1, intercept = 0) +
+  labs(title = 'Loess smoother on predicted open rate, reduced model', color = 'class') +
+  xlim(c(0,1))
+```
+
+Still an excellent result with the reduced model.
 
 # Class year effects
 
