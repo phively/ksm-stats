@@ -1,0 +1,85 @@
+---
+title: "01 DCA Giving Trends"
+output:
+  html_notebook:
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+    code_folding: hide
+---
+
+# Goal
+
+Examine giving trends for the Dean's Consulting Alliance Spring 2019 group. Specifically, assess the following hypotheses:
+
+  * If a graduate disengages with Kellogg right after graduation, they don’t donate ever
+  * Mature alumni who donate in later career have donated as a recent grad
+  
+# Data
+
+A [SQL query](https://github.com/phively/ksm-stats/blob/master/2019-DCA-recent-grad-giving/code/sql-giving-query.sql) was run to pull all full-time alumni (defined as program in 2Y, 1Y, MMM, JDMBA, FT) along with their program, master's degree year, fiscal year of first gift, giving in FY13-18, and giving the fiscal year of graduation and in each of the five subsequent fiscal years.
+
+```{r setup, message = FALSE, warning = FALSE}
+# R libraries
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+```
+
+```{r}
+# Import data
+giving <- read_xlsx(
+  path = 'data/2019-04-29 giving data.xlsx'
+  , sheet = 'With'
+)
+
+# Cleanup
+giving <- giving %>% filter(
+  # Drop 0 years
+  FIRST_MASTERS_YEAR != '0000'
+) %>% mutate(
+  # Program as factor
+  PROGRAM = factor(PROGRAM)
+  # Year as numeric
+  , FIRST_MASTERS_YEAR = as.numeric(FIRST_MASTERS_YEAR)
+) %>% mutate_at(
+  # Convert yearly giving totals into a 0-1 indicator column
+  .vars = vars(GIVING_PFY1:GIVING_GRADYR5)
+  , .funs = function(x) {
+    ifelse(replace_na(x, 0) == 0, 'nondonor', 'donor') %>%
+      factor() %>%
+      relevel(ref = 'nondonor')
+  }
+)
+```
+
+## Distribution by program and year
+
+```{r, fig.height = 7, fig.width = 12}
+giving %>% 
+  ggplot(aes(x = FIRST_MASTERS_YEAR, color = PROGRAM, fill = PROGRAM)) +
+  geom_bar(aes(y = ..count..)) +
+  facet_grid(PROGRAM ~ .) +
+  scale_x_continuous(breaks = seq(0, 3000, by = 5), minor_breaks = 0:3000) +
+  scale_y_continuous(breaks = seq(0, 1E5, by = 100)) +
+  theme(
+    panel.grid.major = element_line(color = 'darkgray')
+    , panel.grid.minor = element_line(color = NA)
+  )
+```
+
+## Donor status by year
+
+```{r, fig.width = 12, fig.height = 4}
+giving %>% 
+  ggplot(aes(x = FIRST_MASTERS_YEAR, color = GIVING_PFY1, fill = GIVING_PFY1)) +
+  geom_bar(aes(y = ..count..), position = 'stack') +
+  scale_x_continuous(breaks = seq(0, 3000, by = 5), minor_breaks = 0:3000) +
+  scale_y_continuous(breaks = seq(0, 1E5, by = 100)) +
+  theme(
+    panel.grid.major = element_line(color = 'darkgray')
+    , panel.grid.minor = element_line(color = NA)
+  ) +
+  labs(title = paste('FY', min(giving$CURR_FY - 1, na.rm = TRUE), 'donor status by MBA year'))
+```
+

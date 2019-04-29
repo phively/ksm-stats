@@ -80,12 +80,12 @@ Select
   , deg.first_masters_year
   , deg.program
   , aggdat.curr_fy
-  , aggdat.giving_cfy
   , aggdat.giving_pfy1
   , aggdat.giving_pfy2
   , aggdat.giving_pfy3
   , aggdat.giving_pfy4
   , aggdat.giving_pfy5
+  , aggdat.giving_pfy6
   , aggdat.giving_gradyr0
   , aggdat.giving_gradyr1
   , aggdat.giving_gradyr2
