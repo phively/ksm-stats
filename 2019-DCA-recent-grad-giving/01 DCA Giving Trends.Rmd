@@ -24,6 +24,7 @@ A [SQL query](https://github.com/phively/ksm-stats/blob/master/2019-DCA-recent-g
 library(tidyverse)
 library(ggplot2)
 library(readxl)
+library(splines)
 ```
 
 ```{r}
@@ -143,3 +144,79 @@ preagg %>%
 ```
 
 We see that most people who end up donating do so for the first time the year they graduate, and there are minor bumps the year after graduation as well as 5, 10, 15...years after corresponding to the Reunion cycle.
+
+# Impact of early giving on later giving
+
+For fundraising purposes, the more relevant question is whether it's true that "mature alumni who donate in later career have donated as a recent grad."
+
+The most straightforward way I can think of to test this hypothesis with the data is to see whether early giving behavior can predict current-day giving after controlling for recent behavior, as well as cohort effects. In other words, if $X$ are the other explanatory variables:
+
+$$ P \left(\text{gave last year} ~ | ~ \text{gave as a recent grad}, X \right) > P \left(\text{gave last year} ~ | ~ !\text{gave as a recent grad}, X \right) $$
+
+Define "gave last year" as making a gift in fiscal year `r max(giving$CURR_FY - 1, na.rm = TRUE)`, "gave as a recent grad" as making a gift 0 through 5 fiscal years after graduation, and recent giving as making a gift in any of fiscal years `r max(giving$CURR_FY - 6, na.rm = TRUE)` through `r max(giving$CURR_FY - 2, na.rm = TRUE)`.
+
+With this in mind, I'll restrict the analysis to only alumni graduating in or before `r max(giving$CURR_FY - 1 - 11, na.rm = TRUE)`, so the full 10 years of giving history are available.
+
+```{r}
+glm1 <- giving %>% filter(
+  FIRST_MASTERS_YEAR <= CURR_FY - 1 - 11
+) %>% select(
+  -ID_NUMBER, -REPORT_NAME, -DEGREES_CONCAT, -FIRST_KSM_YEAR, -CURR_FY, -FIRST_GIFT_YEAR
+) %>% glm(
+  GIVING_PFY1 ~ . - FIRST_MASTERS_YEAR + ns(FIRST_MASTERS_YEAR, df = 3)
+  , data = .
+  , family = binomial()
+)
+summary(glm1)
+```
+
+This is a binary logistic regression model predicting last year's log odds of making a gift given the predictors. From past experience I know that the effect of graduation year is nonlinear, so I used a natural spline fit with 3 degrees of freedom (arbitrary).
+
+Importantly, we can examine the contrasts between donor/nondonor response for each factor.
+
+```{r}
+termplot(glm1)
+```
+
+There are large differences between each level for recent giving - GIVING_PFY2 through GIVING_PFY6 (and the coefficients are *very* statistically significant in the regression output), but almost no perceptible difference between the levels for recent alumni giving - GIVING_GRADYR0 through GIVING_GRADYR5 (and these coefficients were not statistically significant, except for the most recent, GIVING_GRADYR5).
+
+But given that the class gift program hasn't existed forever, perhaps there's an interaction between recent alumni giving and graduation year.
+
+```{r}
+glm2 <- giving %>% filter(
+  FIRST_MASTERS_YEAR <= CURR_FY - 1 - 11
+) %>% select(
+  -ID_NUMBER, -REPORT_NAME, -DEGREES_CONCAT, -FIRST_KSM_YEAR, -CURR_FY, -FIRST_GIFT_YEAR
+) %>% glm(
+  GIVING_PFY1 ~ . - FIRST_MASTERS_YEAR + ns(FIRST_MASTERS_YEAR, df = 3)
+  + ns(FIRST_MASTERS_YEAR, df = 3):GIVING_GRADYR0
+  + ns(FIRST_MASTERS_YEAR, df = 3):GIVING_GRADYR1
+  + ns(FIRST_MASTERS_YEAR, df = 3):GIVING_GRADYR2
+  + ns(FIRST_MASTERS_YEAR, df = 3):GIVING_GRADYR3
+  + ns(FIRST_MASTERS_YEAR, df = 3):GIVING_GRADYR4
+  + ns(FIRST_MASTERS_YEAR, df = 3):GIVING_GRADYR5
+  , data = .
+  , family = binomial()
+)
+
+summary(glm2)
+```
+
+None of the interactions are significant. I'll try one more approach: what about if I remove all recent giving (not recommended) and see if early giving is predictive?
+
+```{r}
+glm3 <- giving %>% filter(
+  FIRST_MASTERS_YEAR <= CURR_FY - 1 - 11
+) %>% select(
+  -ID_NUMBER, -REPORT_NAME, -DEGREES_CONCAT, -FIRST_KSM_YEAR, -CURR_FY, -FIRST_GIFT_YEAR
+) %>% glm(
+  GIVING_PFY1 ~ . - FIRST_MASTERS_YEAR + ns(FIRST_MASTERS_YEAR, df = 3)
+  - GIVING_PFY2 - GIVING_PFY3 - GIVING_PFY4 - GIVING_PFY5 - GIVING_PFY6
+  , data = .
+  , family = binomial()
+)
+
+summary(glm3)
+```
+
+We finally have some "significant" coefficients at the cost of blowing up the AIC. I find this pretty conclusive: early giving behavior is only predictive of previous year donor status when recent data is unavailable.
