@@ -1,0 +1,134 @@
+---
+title: "01 Data exploration"
+output: html_notebook
+
+---
+
+# Setup
+
+```{r setup}
+library(tidyverse)
+library(readxl)
+library(wranglR)
+```
+
+# Data
+
+Load the raw iModules data.
+
+```{r}
+# Email sends
+sends <- lapply(
+  Sys.glob('data_imodules/*.xls*')
+  , read_xlsx
+  , sheet = 1
+)
+dat_sends <- data.frame()
+for(i in 1:length(sends)) {
+  dat_sends <- dat_sends %>% rbind(sends[[i]])
+}
+
+# Email opens
+opens <- lapply(
+  Sys.glob('data_imodules/*.xls*')
+  , read_xlsx
+  , sheet = 'Opens'
+)
+dat_opens <- data.frame()
+for(i in 1:length(opens)) {
+  dat_opens <- dat_opens %>% rbind(opens[[i]])
+}
+
+# Email clicks
+clicks <- lapply(
+  Sys.glob('data_imodules/*.xls*')
+  , read_xlsx
+  , sheet = 'Clicks'
+)
+dat_clicks <- data.frame()
+for(i in 1:length(clicks)) {
+  dat_clicks <- dat_clicks %>% rbind(clicks[[i]])
+}
+
+# Email-ID lookup table
+ids <- read_xlsx(path = 'data/alumni emails.xlsx', sheet = 'Select email') %>%
+  mutate(ID_NUMBER = as.numeric(ID_NUMBER))
+```
+
+Some emails are not associated with CAT IDs; look them up where available.
+
+```{r}
+# Append to dat_sends
+dat_sends <- dat_sends %>%
+  left_join(ids, by = c('recipientEmailAddress' = 'EMAIL_ADDRESS')) %>%
+  mutate(
+    id_final = case_when(
+      !is.na(recipientConstituentId) ~ recipientConstituentId
+      , TRUE ~ ID_NUMBER
+    )
+  )
+
+# Append to dat_opens
+dat_opens <- dat_opens %>%
+  left_join(ids, by = c('recipientEmailAddress' = 'EMAIL_ADDRESS')) %>%
+  mutate(
+    id_final = case_when(
+      !is.na(recipientConstituentId) ~ recipientConstituentId
+      , TRUE ~ ID_NUMBER
+    )
+  )
+
+# Append to dat_clicks
+dat_clicks <- dat_clicks %>%
+  left_join(ids, by = c('emailAddress' = 'EMAIL_ADDRESS')) %>%
+  mutate(
+    id_final = case_when(
+      !is.na(constituentId) ~ constituentId
+      , TRUE ~ ID_NUMBER
+    )
+  )
+```
+
+# iModules data cleanup
+
+Check for missing IDs.
+
+```{r}
+dat_sends %>% select(recipientConstituentId, ID_NUMBER, id_final) %>% summary()
+```
+
+
+```{r}
+dat_opens %>% select(recipientConstituentId, ID_NUMBER, id_final) %>% summary()
+```
+
+```{r}
+dat_clicks %>% select(constituentId, ID_NUMBER, id_final) %>% summary()
+```
+
+Check whether the missing IDs are actually alumni.
+
+```{r}
+dat_sends %>%
+  filter(is.na(id_final)) %>%
+  mutate(ksm = str_detect(recipientEmailAddress, pattern = '.*kellogg.*')) %>%
+  select(ksm, id_final, recipientEmailAddress) %>%
+  distinct() %>%
+  group_by(ksm) %>%
+  summarise(count = length(id_final))
+```
+
+Looks like I need to do some manual lookups, but it's not bad.
+
+```{r}
+# Write records missing IDs to file
+writexl::write_xlsx(
+  x = list(
+    sends = dat_sends %>% filter(is.na(id_final))
+    , opens = dat_opens %>% filter(is.na(id_final))
+    , clicks = dat_clicks %>% filter(is.na(id_final))
+  )
+  , path = 'data/missing ids.xlsx'
+)
+```
+
