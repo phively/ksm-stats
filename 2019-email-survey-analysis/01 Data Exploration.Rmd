@@ -132,3 +132,53 @@ writexl::write_xlsx(
 )
 ```
 
+```{r}
+# Pull ID lookups
+id_lookups <- read_xlsx(path = 'data/missing ids lookups.xlsx', sheet = 1)
+
+# Fill in missing IDs
+fill_ids <- function(data, join_col) {
+  data %>%
+    left_join(
+      id_lookups %>% select(recipientEmailAddress, ID)
+      , by = setNames('recipientEmailAddress', join_col)
+    ) %>%
+    mutate(
+      id_final = case_when(
+        is.na(id_final) ~ ID
+        , TRUE ~ id_final
+      )
+    ) %>%
+    select(recipientId:id_final) %>%
+    return()
+}
+
+dat_sends <- dat_sends %>% fill_ids('recipientEmailAddress')
+dat_opens <- dat_opens %>% fill_ids('recipientEmailAddress')
+dat_clicks <- dat_clicks %>% fill_ids('emailAddress')
+```
+
+```{r}
+data.frame(
+  sends = is.na(dat_sends$id_final) %>% sum()
+  , opens = is.na(dat_opens$id_final) %>% sum()
+  , clicks = is.na(dat_clicks$id_final) %>% sum()
+)
+```
+
+```{r}
+data.frame(
+  sends = dat_sends %>%
+    filter(!str_detect(str_to_lower(recipientEmailAddress), '.*@kellogg.northwestern.*')) %>%
+    select(id_final) %>% is.na() %>% sum()
+  , opens = dat_opens %>%
+    filter(!str_detect(str_to_lower(recipientEmailAddress), '.*@kellogg.northwestern.*')) %>%
+    select(id_final) %>% is.na() %>% sum()
+  , clicks = dat_clicks %>%
+    filter(!str_detect(str_to_lower(emailAddress), '.*@kellogg.northwestern.*')) %>%
+    select(id_final) %>% is.na() %>% sum()
+)
+```
+
+The only remaining NAs are associated with KSM email addresses or the survey sender.
+
