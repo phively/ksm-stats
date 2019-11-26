@@ -1,7 +1,10 @@
 ---
 title: "01 Data exploration"
-output: html_notebook
-
+output:
+  html_notebook:
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
 ---
 
 # Setup
@@ -182,3 +185,71 @@ data.frame(
 
 The only remaining NAs are associated with KSM email addresses or the survey sender.
 
+# Class data sheet
+
+```{r}
+# Load data
+dat_class <- read_xlsx(path = 'data/Class data.xlsx', sheet = 1) %>%
+  mutate(ID_NUMBER = as.numeric(ID_NUMBER))
+```
+
+```{r}
+dat_class  %>% left_join(
+  dat_sends %>% select(id_final) %>% mutate(a = 1) %>% unique()
+  , by = c('ID_NUMBER' = 'id_final')
+) %>% mutate(id = !is.na(a)) %>%
+  select(id) %>% summary()
+```
+
+Almost the entire class was emailable which surprises me.
+
+# Alumni survey data
+
+```{r}
+# Load data
+dat_survey_alum <- read_xlsx(path = 'data/20191126_NPS Results.xlsx', sheet = 1)
+
+emplids <- read_xlsx(path = 'data/ID to EMPLID conversion.xlsx', sheet = 1) %>%
+  mutate(
+    ID_NUMBER = as.numeric(CATRACKS_ID)
+    , EMPLID = as.numeric(EMPLID)
+  ) %>% select(-CATRACKS_ID)
+
+# Append id_numbers
+dat_survey_alum <- dat_survey_alum %>%
+  left_join(emplids, by = c('EmplID' = 'EMPLID'))
+
+# Network survey
+dat_survey_network <- read_xlsx(path = 'data/FY 18 Health of Network 9.14.2018 (Newest Verison).xlsx', sheet = 1, guess_max = 1E5) %>%
+  rename(ID_NUMBER = `Catracks ID`)
+```
+
+```{r}
+dat_survey_alum %>% mutate(id = is.na(ID_NUMBER)) %>% select(id) %>% summary()
+```
+
+That's great -- one id_number was not found. Check how many survey respondents received an email.
+
+```{r}
+dat_survey_alum %>%
+  left_join(dat_sends, by = c('ID_NUMBER' = 'id_final')) %>%
+  mutate(sent_email = !is.na(emailName)) %>%
+  select(EmplID, sent_email) %>%
+  distinct() %>%
+  select(sent_email) %>%
+  summary()
+```
+
+Looks good.
+
+```{r}
+dat_survey_network %>%
+  left_join(dat_sends, by = c('ID_NUMBER' = 'id_final')) %>%
+  mutate(sent_email = !is.na(emailName)) %>%
+  select(ID_NUMBER, sent_email) %>%
+  distinct() %>%
+  select(sent_email) %>%
+  summary()
+```
+
+Fewer responses than I'd like but still looks like useful data.
