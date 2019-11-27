@@ -119,7 +119,6 @@ Check for missing IDs.
 dat_sends %>% select(recipientConstituentId, ID_NUMBER, id_final) %>% summary()
 ```
 
-
 ```{r}
 dat_opens %>% select(recipientConstituentId, ID_NUMBER, id_final) %>% summary()
 ```
@@ -306,7 +305,7 @@ Fewer responses than I'd like but still looks like useful data.
 
 The level of analysis should be an individual (as opposed to an email or a recipient). That suggests that `dat_class` is the base table, and other datapoints need to be aggregated to the individual level.
 
-```{r}
+```{r, warning = FALSE}
 # Aggregate data frame
 dat_agg <- dat_class %>%
   # Append current email info
@@ -345,10 +344,36 @@ dat_agg <- dat_class %>%
   ) %>%
   # Replace NA with 0 in count columns
   mutate_if(is.integer, replace_na, 0) %>%
+  # Alumni survey
+  left_join(
+    dat_survey_alum %>% select(ID_NUMBER, SurveyType:NPSCategory)
+    , by = c('ID_NUMBER' = 'ID_NUMBER')
+  ) %>%
+  # Network survey
+  left_join(
+    dat_survey_network %>% select(ID_NUMBER, NPS_MBA_prog, Ethnicity, Income, NumberOrgs, StudentExp:Survey)
+    , by = c('ID_NUMBER' = 'ID_NUMBER')
+  ) %>%
+  # Cleanup
+  mutate(
+    PROGRAM = factor(PROGRAM)
+    , survey = factor(SURVEY)
+    , GRADS = factor(GRADS)
+    , EMAIL_STATUS = factor(SHORT_DESC)
+    , send_email_status = factor(send_email_status)
+    , SurveyType = factor(SurveyType)
+    , NPSCategory = factor(NPSCategory)
+    , Ethnicity = factor(Ethnicity)
+    , NPS_MBA_prog = as.integer(NPS_MBA_prog)
+    , NumberOrgs = as.integer(NumberOrgs) %>% replace_na(0)
+    , AlumNetworkResponse = as.factor(AlumNetworkResponse)
+  ) %>%
   # Useful flags
   mutate(
     same_email = {str_trim(EMAIL_ADDRESS) %>% str_to_lower() == str_trim(send_email_used) %>% str_to_lower()} %>%
       replace_na(FALSE)
+    , survey_nps_pct = NPS/NPSScale
   )
 ```
+
 
