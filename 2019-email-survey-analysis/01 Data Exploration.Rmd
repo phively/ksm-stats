@@ -11,8 +11,23 @@ output:
 
 ```{r setup}
 library(tidyverse)
+library(lubridate)
 library(readxl)
 library(wranglR)
+```
+
+Some data validation functions.
+
+```{r}
+# Check for duplicate rows, based on some single-column unique identifier
+check_dupes <- function(dataframe, unique_id_colname) {
+  print(
+    paste(
+      'Duplicates?'
+      , nrow(dataframe) != dataframe %>% select_(unique_id_colname) %>% unique() %>% nrow()
+    )
+  )
+}
 ```
 
 # Data
@@ -69,6 +84,8 @@ dat_sends <- dat_sends %>%
       !is.na(recipientConstituentId) ~ recipientConstituentId
       , TRUE ~ ID_NUMBER
     )
+    , deliveredTimestamp = ymd_hms(deliveredTimestamp)
+    , dateAdded = ymd_hms(dateAdded)
   )
 
 # Append to dat_opens
@@ -79,6 +96,8 @@ dat_opens <- dat_opens %>%
       !is.na(recipientConstituentId) ~ recipientConstituentId
       , TRUE ~ ID_NUMBER
     )
+    , openedTimestamp = ymd_hms(openedTimestamp)
+    , lastActionTime = ymd_hms(lastActionTime)
   )
 
 # Append to dat_clicks
@@ -203,6 +222,25 @@ dat_class  %>% left_join(
 
 Almost the entire class was emailable which surprises me.
 
+```{r}
+check_dupes(dat_class, 'ID_NUMBER')
+```
+
+# Email data check
+
+Confirm that entities have at most one associated preferred email.
+
+```{r}
+check_dupes(
+  dat_class %>%
+    left_join(
+      ids %>% filter(PREFERRED_IND == 'Y')
+      , by = c('ID_NUMBER' = 'ID_NUMBER')
+    )
+  , 'ID_NUMBER'
+)
+```
+
 # Alumni survey data
 
 ```{r}
@@ -223,6 +261,16 @@ dat_survey_alum <- dat_survey_alum %>%
 dat_survey_network <- read_xlsx(path = 'data/FY 18 Health of Network 9.14.2018 (Newest Verison).xlsx', sheet = 1, guess_max = 1E5) %>%
   rename(ID_NUMBER = `Catracks ID`)
 ```
+
+```{r}
+check_dupes(dat_survey_alum, 'ID_NUMBER')
+```
+
+```{r}
+check_dupes(dat_survey_network, 'ID_NUMBER')
+```
+
+No duplicate records for either data frame.
 
 ```{r}
 dat_survey_alum %>% mutate(id = is.na(ID_NUMBER)) %>% select(id) %>% summary()
@@ -253,3 +301,54 @@ dat_survey_network %>%
 ```
 
 Fewer responses than I'd like but still looks like useful data.
+
+# Data file creation
+
+The level of analysis should be an individual (as opposed to an email or a recipient). That suggests that `dat_class` is the base table, and other datapoints need to be aggregated to the individual level.
+
+```{r}
+# Aggregate data frame
+dat_agg <- dat_class %>%
+  # Append current email info
+  left_join(
+      ids %>% filter(PREFERRED_IND == 'Y')
+      , by = c('ID_NUMBER' = 'ID_NUMBER')
+  ) %>%
+  # Aggregate all email data to the id_number level
+  # Sends
+  left_join(
+    dat_sends %>% group_by(id_final) %>% summarise(
+      send_email_used = max(recipientEmailAddress)
+      , send_email_status = max(SHORT_DESC)
+      , send_email_status_change_dt = max(STATUS_CHANGE_DATE)
+      , send_email_dt_mod = max(DATE_MODIFIED)
+      , last_delivered_dt = max(deliveredTimestamp)
+      , n_delivered = length(deliveredTimestamp)
+    )
+    , by = c('ID_NUMBER' = 'id_final')
+  ) %>%
+  # Opens
+  left_join(
+    dat_opens %>% group_by(id_final) %>% summarise(
+      last_opened_dt = max(openedTimestamp)
+      , n_opened = length(openedTimestamp)
+      , last_click_dt = max(lastActionTime)
+    )
+    , by = c('ID_NUMBER' = 'id_final')
+  ) %>%
+  # Clicks
+  left_join(
+    dat_clicks %>% group_by(id_final) %>% summarise(
+      n_clicks = length(clickDate)
+    )
+    , by = c('ID_NUMBER' = 'id_final')
+  ) %>%
+  # Replace NA with 0 in count columns
+  mutate_if(is.integer, replace_na, 0) %>%
+  # Useful flags
+  mutate(
+    same_email = {str_trim(EMAIL_ADDRESS) %>% str_to_lower() == str_trim(send_email_used) %>% str_to_lower()} %>%
+      replace_na(FALSE)
+  )
+```
+
