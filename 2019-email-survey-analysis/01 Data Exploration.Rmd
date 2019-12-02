@@ -376,4 +376,9 @@ dat_agg <- dat_class %>%
   )
 ```
 
+# Output file
+
+```{r}
+save(dat_agg, file = 'data/dat_agg.Rdata')
+```
 
