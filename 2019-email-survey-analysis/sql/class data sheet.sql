@@ -32,6 +32,7 @@ survey As (
     , first_ksm_year
     , first_masters_year
     , program
+    , program_group
   From survey
   Union
   Select
@@ -41,6 +42,7 @@ survey As (
     , first_ksm_year
     , first_masters_year
     , program
+    , program_group
   From grads
 )
 

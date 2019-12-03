@@ -1,11 +1,18 @@
 ---
 title: "Email statistics"
 output:
-  html_document:
+  html_notebook:
+    code_folding: hide
     toc: TRUE
     toc_float:
       collapsed: FALSE
 ---
+
+<style>
+#header .btn-group {
+    display: none;
+}
+</style>
 
 ```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
 # Libraries
@@ -56,6 +63,15 @@ Summary statistics for each publication appear below. Looking at the email send 
 
 # iModules summary statistics
 
+## Businessweek
+
+```{r}
+dat_summary_table %>%
+  filter(Publication == 'Businessweek') %>%
+  select(-Publication, -`Time Sent`) %>%
+  kable()
+```
+
 ## Economist
 
 ```{r}
@@ -65,11 +81,11 @@ dat_summary_table %>%
   kable()
 ```
 
-## Businessweek
+## Financial Times
 
 ```{r}
 dat_summary_table %>%
-  filter(Publication == 'Businessweek') %>%
+  filter(Publication == 'Financial Times') %>%
   select(-Publication, -`Time Sent`) %>%
   kable()
 ```
@@ -85,13 +101,69 @@ dat_summary_table %>%
 
 Forbes email metrics are not available, as the emails were sent through Outlook rather than iModules (recipients had personalized links).
 
-## Financial Times
-
-```{r}
-dat_summary_table %>%
-  filter(Publication == 'Financial Times') %>%
-  select(-Publication, -`Time Sent`) %>%
-  kable()
-```
+Overall, the bounce rates are surprisingly low, and the open/click rates quite high.
 
 # Computed summary statistics
+
+As a point of comparison, I pulled a full class list from the database. Now, the unit of analysis is individuals rather than emails. Individuals are categorized by the set of emails received, e.g. Economist 2018 FT is full-time 2018 graduates emailed about the Economist.
+
+If an individual opened either an initial email or a reminder, I counted that as an open; the same goes for clicks. Note that raw counts will be different, as non-alumni recipients (such as KSM staff) are filtered out, unlike in the summary statistics above.
+
+```{r}
+# Summary table metrics
+dat_agg %>%
+  group_by(email_group) %>%
+  summarize(
+    n = length(ID_NUMBER)
+    , sent = sum(ifelse(n_sent > 0, 1, 0))
+    , bounced = sum(ifelse(n_bounced > 0, 1, 0))
+    , opened = sum(ifelse(n_opened_or_clicked > 0, 1, 0))
+    , clicked = sum(ifelse(n_clicks > 0, 1, 0))
+  ) %>% mutate(
+    open_pct = scales::percent(opened / sent)
+    , clicked_pct = scales::percent(clicked / (opened + 1E-100))
+  )
+```
+
+Drilling down into this None group:
+
+```{r}
+dat_agg %>%
+  filter(email_group == 'None') %>%
+  group_by(FIRST_MASTERS_YEAR, PROGRAM_GROUP) %>%
+  summarise(n = length(ID_NUMBER))
+```
+
+Adding these groups to the above table yields the following.
+
+```{r}
+dat_agg <- dat_agg %>% mutate(
+  email_group_filled = case_when(
+    as.character(email_group) != 'None' ~ as.character(email_group)
+    , PROGRAM_GROUP == 'EMBA' ~ 'Financial Times 2016 EMBA'
+    , FIRST_MASTERS_YEAR == 2013 ~ 'Businessweek 2013 FT'
+    , FIRST_MASTERS_YEAR == 2016 ~ 'Financial Times 2016 FT'
+    , FIRST_MASTERS_YEAR == 2018 ~ 'Economist 2018 FT'
+    , TRUE ~ 'None'
+  ) %>% as.factor()
+)
+```
+```{r}
+dat_agg %>%
+  group_by(email_group_filled) %>%
+  summarize(
+    n = length(ID_NUMBER)
+    , sent = sum(ifelse(n_sent > 0, 1, 0))
+    , bounced = sum(ifelse(n_bounced > 0, 1, 0))
+    , opened = sum(ifelse(n_opened_or_clicked > 0, 1, 0))
+    , clicked = sum(ifelse(n_clicks > 0, 1, 0))
+  ) %>% mutate(
+    sent_pct = scales::percent(sent / n)
+    , open_pct = scales::percent(opened / sent)
+    , clicked_pct = scales::percent(clicked / (opened + 1E-100))
+  )
+```
+
+It's possible that link tracking was not enabled for Financial Times and the captured clicks were to non-survey links.
+
+# Email address analysis

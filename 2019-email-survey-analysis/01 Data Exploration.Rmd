@@ -358,7 +358,9 @@ dat_agg <- dat_class %>%
   # Sends
   left_join(
     dat_sends %>% group_by(id_final) %>% summarise(
-      send_email_used = max(recipientEmailAddress)
+      send_class_year = max(recipientClassYear)
+      , send_email = max(emailName)
+      , send_email_used = max(recipientEmailAddress)
       , send_email_status = max(SHORT_DESC)
       , send_email_status_change_dt = max(STATUS_CHANGE_DATE)
       , send_email_dt_mod = max(DATE_MODIFIED)
@@ -412,16 +414,27 @@ dat_agg <- dat_class %>%
     dat_survey_network %>% select(ID_NUMBER, NPS_MBA_prog, Ethnicity, Income, NumberOrgs, StudentExp:Survey)
     , by = c('ID_NUMBER' = 'ID_NUMBER')
   ) %>%
-  # Cleanup
+  # Column name cleanup
+  rename(
+    EMAIL_STATUS = SHORT_DESC
+  ) %>%
+  # Fix data types
   mutate(
-    PROGRAM = factor(PROGRAM)
-    , survey = factor(SURVEY)
-    , GRADS = factor(GRADS)
-    , EMAIL_STATUS = factor(SHORT_DESC)
-    , send_email_status = factor(send_email_status)
-    , SurveyType = factor(SurveyType)
-    , NPSCategory = factor(NPSCategory)
-    , Ethnicity = factor(Ethnicity)
+    RECORD_STATUS_CODE = as.factor(RECORD_STATUS_CODE)
+    , FIRST_KSM_YEAR = as.numeric(FIRST_KSM_YEAR)
+    , FIRST_MASTERS_YEAR = as.numeric(FIRST_MASTERS_YEAR)
+    , PROGRAM = as.factor(PROGRAM)
+    , PROGRAM_GROUP = as.factor(PROGRAM_GROUP) %>%
+        fct_recode('Full-Time' = 'FT', 'EMBA' = 'EMP')
+    , SURVEY = as.factor(SURVEY)
+    , GRADS = as.factor(GRADS)
+    , EMAIL_STATUS_CODE = as.factor(EMAIL_STATUS_CODE)
+    , EMAIL_STATUS = as.factor(EMAIL_STATUS)
+    , PREFERRED_IND = as.factor(PREFERRED_IND)
+    , send_email_status = as.factor(send_email_status)
+    , SurveyType = as.factor(SurveyType)
+    , NPSCategory = as.factor(NPSCategory)
+    , Ethnicity = as.factor(Ethnicity)
     , NPS_MBA_prog = as.integer(NPS_MBA_prog)
     , NumberOrgs = as.integer(NumberOrgs) %>% replace_na(0)
     , AlumNetworkResponse = as.factor(AlumNetworkResponse)
@@ -433,6 +446,42 @@ dat_agg <- dat_class %>%
     , survey_nps_pct = NPS/NPSScale
   )
 ```
+
+Determine which email group each alum belongs to.
+
+```{r, rows.print = 100}
+dat_agg %>%
+  group_by(send_email, FIRST_MASTERS_YEAR, PROGRAM_GROUP) %>%
+  summarize(n = length(ID_NUMBER))
+```
+
+```{r}
+dat_agg <- dat_agg %>% mutate(
+  email_group = case_when(
+    is.na(send_email) ~
+      'None'
+    , send_email == 'RankingSurvey_2019EconomistWhichMBA_2018_2Y_04.16.19'
+      ~ 'Economist 2018 FT'
+    , send_email == 'RankingSurvey_Businessweek_2Y_2013_Reminder_07.11.19'
+      ~ 'Businessweek 2013 FT'
+    , send_email == 'RankingSurvey_BusinessWeek_FT2013_04.25.19'
+      ~ 'Businessweek 2013 FT'
+    , send_email == 'RankingSurvey_FT_2016EMBA_06.05.19'
+      ~ 'Financial Times 2016 EMBA'
+    , send_email == 'RankingSurvey_FT_EMBA(2016)_2ndReminder_07.23.19'
+      ~ 'Financial Times 2016 EMBA'
+    , send_email == 'RankingSurvey_FT_2016MBAs_09.05.19'
+      ~ 'Financial Times 2016 FT'
+  ) %>% as.factor()
+)
+```
+
+```{r, rows.print = 100}
+dat_agg %>%
+  group_by(email_group, send_email, FIRST_MASTERS_YEAR, PROGRAM_GROUP) %>%
+  summarize(n = length(ID_NUMBER))
+```
+
 
 # Output file
 
