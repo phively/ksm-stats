@@ -1,0 +1,97 @@
+---
+title: "Email statistics"
+output:
+  html_document:
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+---
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+# Libraries
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(wranglR)
+library(knitr)
+
+# Set to FALSE to hide all code chunks when rendering the document
+opts_chunk$set(echo = FALSE)
+
+# Load data from last time
+load('data/dat_agg.Rdata')
+```
+
+# Background and definitions
+
+```{r, warning = FALSE}
+# Email summary data from iModules
+dat_summary_table <- read_xlsx(
+  'data/Ranking Survey Email Metrics 18-19.xlsx'
+  , sheet = 2
+  , col_types = c('text', 'text', 'text', 'text', 'date', 'text', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric', 'text')
+) %>%
+  filter(!is.na(`Email Type`) & Publication != 'Publication') %>%
+  # Better column names
+  rename(
+    Drilldown = `Drill Down Data Available?`
+  ) %>%
+  # Format percents
+  mutate(
+    `Open Rate` = `Open Rate` %>% round(2) %>% scales::percent()
+    , CTR = CTR %>% round(2) %>% scales::percent()
+  )
+```
+
+iModules is the system used to send mass emails to Northwestern constituents, including alumni. Detailed email recipient, bounce, open, and click data is available for 480 days after an email is sent; after that time, only summary statistics are available.
+
+The metrics are defined as follows:
+
+* **Delivered** = 200 HTTP status code response from server, e.g. the request was fulfilled (*delivered does not imply inbox placement*)
+* **Bounces** = email addresses that could not be successfully delivered to the recipient's inbox for some reason
+* **Open** = tracking pixel loaded (*implying that image blocking or plain-text email clients leads to underreporting of opens*)
+* **Click** = number of times any recipient clicks on any link within the email where tracking is active (*excluding the unsubscribe link*)
+
+Summary statistics for each publication appear below. Looking at the email send dates, detailed information is available for just `r dat_summary_table %>% filter(Drilldown == 'Y') %>% nrow() %>% I()` of the `r dat_summary_table %>% nrow() %>% I()` emails sent (`Drilldown == 'Y'`).
+
+# iModules summary statistics
+
+## Economist
+
+```{r}
+dat_summary_table %>%
+  filter(Publication == 'Economist') %>%
+  select(-Publication, -`Time Sent`) %>%
+  kable()
+```
+
+## Businessweek
+
+```{r}
+dat_summary_table %>%
+  filter(Publication == 'Businessweek') %>%
+  select(-Publication, -`Time Sent`) %>%
+  kable()
+```
+
+## Forbes
+
+```{r}
+dat_summary_table %>%
+  filter(Publication == 'Forbes') %>%
+  select(-Publication, -`Time Sent`) %>%
+  kable()
+```
+
+Forbes email metrics are not available, as the emails were sent through Outlook rather than iModules (recipients had personalized links).
+
+## Financial Times
+
+```{r}
+dat_summary_table %>%
+  filter(Publication == 'Financial Times') %>%
+  select(-Publication, -`Time Sent`) %>%
+  kable()
+```
+
+# Computed summary statistics
