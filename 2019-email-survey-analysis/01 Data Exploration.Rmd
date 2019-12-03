@@ -46,6 +46,24 @@ for(i in 1:length(sends)) {
   dat_sends <- dat_sends %>% rbind(sends[[i]])
 }
 
+# Email bounces
+bounces <- lapply(
+  Sys.glob('data_imodules/*.xls*')
+  # Error handling for missing sheets
+  , function(x) {
+      return(
+        tryCatch(
+          read_xlsx(x, sheet = 'Bounces')
+          , error = function(y) {NULL}
+        )
+      )
+    }
+)
+dat_bounces <- data.frame()
+for(i in 1:length(bounces)) {
+  dat_bounces <- dat_bounces %>% rbind(bounces[[i]])
+}
+
 # Email opens
 opens <- lapply(
   Sys.glob('data_imodules/*.xls*')
@@ -88,6 +106,18 @@ dat_sends <- dat_sends %>%
     , dateAdded = ymd_hms(dateAdded)
   )
 
+# Append to dat_bounces
+dat_bounces <- dat_bounces %>%
+  mutate(recipientConstituentId = as.numeric(recipientConstituentId)) %>%
+  left_join(ids, by = c('recipientEmailAddress' = 'EMAIL_ADDRESS')) %>%
+  mutate(
+    id_final = case_when(
+      !is.na(recipientConstituentId) ~ recipientConstituentId
+      , TRUE ~ ID_NUMBER
+    )
+    , bouncedTimestamp = ymd_hms(bouncedTimestamp)
+  )
+
 # Append to dat_opens
 dat_opens <- dat_opens %>%
   left_join(ids, by = c('recipientEmailAddress' = 'EMAIL_ADDRESS')) %>%
@@ -120,6 +150,11 @@ dat_sends %>% select(recipientConstituentId, ID_NUMBER, id_final) %>% summary()
 ```
 
 ```{r}
+dat_bounces %>% select(recipientConstituentId, ID_NUMBER, id_final) %>% summary()
+```
+
+
+```{r}
 dat_opens %>% select(recipientConstituentId, ID_NUMBER, id_final) %>% summary()
 ```
 
@@ -146,6 +181,7 @@ Looks like I need to do some manual lookups, but it's not bad.
 writexl::write_xlsx(
   x = list(
     sends = dat_sends %>% filter(is.na(id_final))
+    , bounces = dat_bounces %>% filter(is.na(id_final))
     , opens = dat_opens %>% filter(is.na(id_final))
     , clicks = dat_clicks %>% filter(is.na(id_final))
   )
@@ -175,6 +211,7 @@ fill_ids <- function(data, join_col) {
 }
 
 dat_sends <- dat_sends %>% fill_ids('recipientEmailAddress')
+dat_bounces <- dat_bounces %>% fill_ids('recipientEmailAddress')
 dat_opens <- dat_opens %>% fill_ids('recipientEmailAddress')
 dat_clicks <- dat_clicks %>% fill_ids('emailAddress')
 ```
@@ -182,6 +219,7 @@ dat_clicks <- dat_clicks %>% fill_ids('emailAddress')
 ```{r}
 data.frame(
   sends = is.na(dat_sends$id_final) %>% sum()
+  , bounces = is.na(dat_bounces$id_final) %>% sum()
   , opens = is.na(dat_opens$id_final) %>% sum()
   , clicks = is.na(dat_clicks$id_final) %>% sum()
 )
@@ -190,6 +228,9 @@ data.frame(
 ```{r}
 data.frame(
   sends = dat_sends %>%
+    filter(!str_detect(str_to_lower(recipientEmailAddress), '.*@kellogg.northwestern.*')) %>%
+    select(id_final) %>% is.na() %>% sum()
+  , bounces = dat_bounces %>%
     filter(!str_detect(str_to_lower(recipientEmailAddress), '.*@kellogg.northwestern.*')) %>%
     select(id_final) %>% is.na() %>% sum()
   , opens = dat_opens %>%
@@ -326,6 +367,15 @@ dat_agg <- dat_class %>%
     )
     , by = c('ID_NUMBER' = 'id_final')
   ) %>%
+  # Bounces
+  left_join(
+    dat_bounces %>% group_by(id_final) %>% summarise(
+      last_bounced_dt = max(bouncedTimestamp)
+      , n_bounced = length(bouncedTimestamp)
+      , bounce_reason = max(bounceReason)
+    )
+    , by = c('ID_NUMBER' = 'id_final')
+  ) %>%
   # Opens
   left_join(
     dat_opens %>% group_by(id_final) %>% summarise(
@@ -337,13 +387,21 @@ dat_agg <- dat_class %>%
   ) %>%
   # Clicks
   left_join(
-    dat_clicks %>% group_by(id_final) %>% summarise(
-      n_clicks = length(clickDate)
-    )
+    dat_clicks %>% group_by(id_final) %>%
+      summarise(
+        n_clicks = length(clickDate)
+      )
     , by = c('ID_NUMBER' = 'id_final')
   ) %>%
   # Replace NA with 0 in count columns
   mutate_if(is.integer, replace_na, 0) %>%
+  # Useful derived fields
+  mutate(
+    # Derived sent - delivered or bounced
+    n_sent = n_delivered + n_bounced
+    # Derived opens - open or click
+    , n_opened_or_clicked = n_opened + n_clicks
+  ) %>%
   # Alumni survey
   left_join(
     dat_survey_alum %>% select(ID_NUMBER, SurveyType:NPSCategory)
