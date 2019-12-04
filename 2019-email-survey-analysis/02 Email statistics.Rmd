@@ -218,6 +218,9 @@ plot_cis <- function(
     scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = .2), labels = scales::percent)
 }
 ```
+
+## Open rates
+
 ```{r}
 dat_agg %>% plot_cis(
   xdat = email_group_filled_lb, ydat = open_pct, ndat = sent, colordat = same_email
@@ -306,15 +309,18 @@ So around 4 years ago from summer 2015 to summer 2016 a bunch of good emails wer
 Plugging this all into a quick and simple model:
 
 ```{r}
-glm_opens <- dat_agg %>%
+dat_agg <- dat_agg %>%
   mutate(
     any_open = ifelse(n_opened_or_clicked > 0, 1, 0)
+    , any_click = ifelse(n_clicks > 0, 1, 0)
     , weeks_since_email = difftime(last_delivered_dt, STATUS_CHANGE_DATE, units = 'weeks') %>% as.numeric()
     , send_email_status = case_when(
       is.na(send_email_status) ~ 'NA'
       , TRUE ~ as.character(send_email_status)
     ) %>% as.factor()
-  ) %>%
+  )
+
+glm_opens <- dat_agg %>%
   glm(
     any_open ~ email_group_filled + same_email + send_email_status + ns(weeks_since_email, df = 4)
     , data = .
@@ -332,4 +338,113 @@ crPlots(glm_opens, terms = ~ email_group_filled)
 crPlots(glm_opens, terms = ~ same_email)
 crPlots(glm_opens, terms = ~ send_email_status)
 crPlots(glm_opens, terms = ~ ns(weeks_since_email, df = 4))
+```
+
+## Clicks
+
+Now consider the same analyses with click data.
+
+```{r, warning = FALSE}
+dat_agg %>%
+  plot_cis(
+    xdat = email_group_filled_lb, ydat = clicked_pct, ndat = opened, colordat = same_email
+    , title = 'Click rate based on use of preferred email with 95% CI', ylab = 'Click rate', collab = 'Used pref email'
+  )
+```
+
+Note that the click rates are very low for the Financial Times surveys; again, I wonder whether the data was not captured correctly. These two should probably be modeled separately from the others.
+
+```{r, warning = FALSE}
+dat_agg %>% plot_cis(
+  xdat = email_group_filled_lb, ydat = clicked_pct, ndat = opened, colordat = send_email_status
+  , title = 'Click rate based on use of send email status with 95% CI', ylab = 'Open rate', collab = 'Send email status')
+```
+
+```{r, warning = FALSE, message = FALSE}
+click_time_plot <- dat_agg %>%
+  mutate(
+    weeks_since_email = difftime(last_delivered_dt, STATUS_CHANGE_DATE, units = 'weeks') %>% as.numeric()
+    , any_open = ifelse(n_opened_or_clicked > 0, 1, 0)
+  ) %>%
+  ggplot(aes(x = weeks_since_email, y = any_click)) +
+  geom_point(aes(color = as.factor(any_click))) +
+  geom_smooth(method = 'lm', color = 'darkgreen') +
+  geom_smooth() +
+  scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
+  labs(
+    title = 'Email click rate as
+    f(email delivery date, email address status update date)'
+    , x = 'Weeks between email delivery date and last database preferred email status update'
+    , y = 'Any email opened'
+    , col = 'Any email opened'
+  )
+click_time_plot
+```
+
+Looks like the same trend as for opens, just the click rate starts much lower. Ignoring the two Financial Times surveys:
+
+```{r, warning = FALSE, message = FALSE}
+click_time_plot_filt <- dat_agg %>%
+  mutate(
+    weeks_since_email = difftime(last_delivered_dt, STATUS_CHANGE_DATE, units = 'weeks') %>% as.numeric()
+    , any_open = ifelse(n_opened_or_clicked > 0, 1, 0)
+  ) %>%
+  filter(email_group_filled %in% c('Businessweek 2013 FT', 'Economist 2018 FT')) %>%
+  ggplot(aes(x = weeks_since_email, y = any_click)) +
+  geom_point(aes(color = as.factor(any_click))) +
+  geom_smooth(method = 'lm', color = 'darkgreen') +
+  geom_smooth() +
+  scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
+  labs(
+    title = 'Email click rate as
+    f(email delivery date, email address status update date)'
+    , x = 'Weeks between email delivery date and last database preferred email status update'
+    , y = 'Any email opened'
+    , col = 'Any email opened'
+  )
+click_time_plot_filt
+```
+
+So the noisiness was pretty much all due to Financial Times. Now breaking things out by publication:
+
+```{r, fig.height = 12, fig.width = 8, warning = FALSE, message = FALSE}
+click_time_plot +
+  facet_grid(email_group_filled_lb ~ .) +
+  labs(title = '')
+```
+
+And finally trying a quick model:
+
+```{r}
+glm_clicks <- dat_agg %>%
+  filter(email_group_filled %in% c('Businessweek 2013 FT', 'Economist 2018 FT')) %>%
+  glm(
+    any_open ~ email_group_filled + same_email + send_email_status + ns(weeks_since_email, df = 4)
+    , data = .
+    , family = binomial()
+  )
+```
+```{r}
+summary(glm_clicks)
+```
+
+So email status doesn't provide any information beyond knowing that the preferred email was used.
+
+```{r}
+glm_clicks2 <- dat_agg %>%
+  filter(email_group_filled %in% c('Businessweek 2013 FT', 'Economist 2018 FT')) %>%
+  glm(
+    any_open ~ email_group_filled + same_email + ns(weeks_since_email, df = 4)
+    , data = .
+    , family = binomial()
+  )
+```
+```{r}
+summary(glm_clicks2)
+```
+
+```{r}
+crPlots(glm_clicks2, terms = ~ email_group_filled)
+crPlots(glm_clicks2, terms = ~ same_email)
+crPlots(glm_clicks2, terms = ~ ns(weeks_since_email, df = 4))
 ```
