@@ -1,0 +1,158 @@
+---
+title: "Survey statistics"
+output:
+  html_notebook:
+    code_folding: hide
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+---
+
+<style>
+#header .btn-group {
+    display: none;
+}
+</style>
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+# Libraries
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(wranglR)
+library(knitr)
+library(splines)
+library(car)
+
+# Parameters -- edit if needed
+data_as_of <- ymd('20191202')
+
+# Set to FALSE to hide all code chunks when rendering the document
+opts_chunk$set(echo = FALSE)
+```
+```{r}
+# Load data from last time
+load('data/dat_agg2.Rdata')
+```
+
+# Background and goals
+
+Data from multiple student and alumni surveys is available, and there is some (incomplete) overlap between the population of survey respondents and email recipients.
+
+  * Exit survey: attitudes about KSM measured at the time of graduation, measured on a 5-point (2013) or 10-point (later) scale
+  * Network survey: most recent attitudes about the KSM alumni network measured at different times (looks like since 2017)
+
+I expect attitude to influence email open/click rates; anecdotally, people with excellent and or experiences are most likely to give feedback, and that effect could appear in this dataset.
+
+I'm also interested in looking at whether the three NPS categories of promoter, passive, and detractor are supported by the data or whether the raw (rescaled) values are more informative.
+
+# Exit survey
+
+Since the NPS scale changed from 5 points to 10 points I rescaled the responses to 0-10. It's also possible to look at them as an ordered factor.
+
+Exit survey data is available for `r dat_agg %>% filter(!is.na(NPS)) %>% nrow() %>% I()` of the `r nrow(dat_agg) %>% I()` total alumni.
+
+```{r, message = FALSE}
+dat_agg <- dat_agg %>%
+  mutate(survey_nps_rescale = survey_nps_pct * 10)
+
+dat_agg %>%
+  mutate(`NPS (rescaled)` = 'Count') %>%
+  group_by(`NPS (rescaled)`, survey_nps_rescale) %>%
+  summarise(n = n()) %>%
+  spread(survey_nps_rescale, n) %>%
+  mutate_if(is.numeric, function(x) ifelse(is.na(x), 0, x)) %>%
+  kable()
+```
+
+```{r, warning = FALSE}
+exit_nps <- dat_agg %>%
+  ggplot(aes(x = survey_nps_rescale, y = any_open)) +
+  geom_point(
+    aes(color = factor(any_open))
+    , position = position_jitter(width = .05, height = .03, seed = 123)
+  ) +
+  geom_smooth(method = 'lm', color = 'darkgreen') +
+  geom_smooth(method = 'loess') +
+  labs(title = 'Email opens by exit NPS (rescaled)', x = 'NPS (rescaled)', y = 'Open', color = 'Open') +
+  scale_x_continuous(limits = c(0, 10), breaks = 0:10, minor_breaks = NULL)
+print(exit_nps)
+```
+
+That bump at 9 is almost certainly due to 9 not being a valid rescaled value in the 2013 results. Breaking this down by email group (which also breaks out the 5-point 2013 class):
+
+```{r, fig.height = 12, fig.width = 8, warning = FALSE, message = FALSE}
+exit_nps +
+  facet_grid(email_group_filled_lb ~ .)
+```
+
+The eyeball test doesn't find a consistent pattern. Low NPS scores appear to be outliers. Looking at the raw data:
+
+```{r, warning = FALSE}
+dat_agg %>%
+  ggplot(aes(x = email_group_filled_lb, y = survey_nps_rescale, color = factor(any_open))) +
+  geom_boxplot(alpha = .5) +
+  labs(title = 'Email opens by exit NPS (rescaled) and publication', x = '', y = 'NPS (rescaled)', color = 'Open')
+```
+```{r, fig.height = 12, fig.width = 8, rows.print = 100, warning = FALSE}
+dat_agg %>%
+  ggplot(aes(x = survey_nps_rescale, fill = as.factor(any_open))) +
+  geom_histogram(bins = 10, alpha = .8) +
+  facet_grid(email_group_filled_lb ~ .) +
+  labs(title = 'Count of respondents by NPS', y = 'Count', x = 'NPS (rescaled)', fill = 'Open')
+```
+```{r, message = FALSE}
+dat_agg %>%
+  filter(!is.na(survey_nps_rescale)) %>%
+  group_by(email_group_filled, survey_nps_rescale, any_open) %>%
+  summarise(n = n()) %>%
+  spread(survey_nps_rescale, n) %>%
+  mutate_if(is.numeric, function(x) ifelse(is.na(x), 0, x))
+```
+
+And the proportions:
+
+```{r, message = FALSE}
+dat_agg %>%
+  filter(!is.na(survey_nps_rescale)) %>%
+  group_by(email_group_filled, survey_nps_rescale) %>%
+  summarise(n = sum(any_open)/n()) %>%
+  spread(survey_nps_rescale, n) %>%
+  mutate_if(is.numeric, function(x) ifelse(is.na(x), scales::percent(0), scales::percent(x)))
+```
+
+Looking instead at the NPS bins.
+
+```{r, message = FALSE}
+npsbins <- dat_agg %>%
+  filter(!is.na(survey_nps_rescale)) %>%
+  group_by(email_group_filled, NPSCategory, any_open) %>%
+  summarise(n = n())
+# Print table
+npsbins %>%
+  spread(NPSCategory, n) %>%
+  mutate_if(is.numeric, function(x) ifelse(is.na(x), 0, x)) %>%
+  print()
+```
+
+```{r, message = FALSE}
+dat_agg %>%
+  filter(!is.na(survey_nps_rescale)) %>%
+  mutate(any_open = ifelse(any_open == 1, TRUE, FALSE)) %>%
+  group_by(email_group_filled, NPSCategory) %>%
+  summarise(n = sum(any_open)/n()) %>%
+  spread(NPSCategory, n) %>%
+  mutate_if(is.numeric, function(x) ifelse(is.na(x), scales::percent(0), scales::percent(x)))
+```
+
+Again, not very consistent, though the number of detractors overall is very small.
+
+# Network survey
+
+(Need to understand this data better - is 0 a score or how they coded missing values?)
+
+```{r}
+# Export data from this step
+save(dat_agg, file = 'data/dat_agg3.Rdata')
+```
+

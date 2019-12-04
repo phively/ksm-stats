@@ -253,7 +253,7 @@ email_time_plot <- dat_agg %>%
   ggplot(aes(x = weeks_since_email, y = any_open)) +
   geom_point(aes(color = as.factor(any_open))) +
   geom_smooth(method = 'lm', color = 'darkgreen') +
-  geom_smooth() +
+  geom_smooth(method = 'loess') +
   scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
   labs(
     title = 'Email open rate as
@@ -284,7 +284,7 @@ email_year_plot <- dat_agg %>%
   ggplot(aes(x = STATUS_CHANGE_DATE, y = any_open)) +
   geom_point(aes(color = as.factor(any_open))) +
   geom_smooth(method = 'lm', color = 'darkgreen') +
-  geom_smooth() +
+  geom_smooth(method = 'loess') +
   scale_x_date(date_breaks = '1 year', date_labels = '%Y') +
   scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
   labs(
@@ -369,7 +369,7 @@ click_time_plot <- dat_agg %>%
   ggplot(aes(x = weeks_since_email, y = any_click)) +
   geom_point(aes(color = as.factor(any_click))) +
   geom_smooth(method = 'lm', color = 'darkgreen') +
-  geom_smooth() +
+  geom_smooth(method = 'loess') +
   scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
   labs(
     title = 'Email click rate as
@@ -393,7 +393,7 @@ click_time_plot_filt <- dat_agg %>%
   ggplot(aes(x = weeks_since_email, y = any_click)) +
   geom_point(aes(color = as.factor(any_click))) +
   geom_smooth(method = 'lm', color = 'darkgreen') +
-  geom_smooth() +
+  geom_smooth(method = 'loess') +
   scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
   labs(
     title = 'Email click rate as
@@ -448,3 +448,9 @@ crPlots(glm_clicks2, terms = ~ email_group_filled)
 crPlots(glm_clicks2, terms = ~ same_email)
 crPlots(glm_clicks2, terms = ~ ns(weeks_since_email, df = 4))
 ```
+
+```{r}
+# Save current data
+save(dat_agg, email_summary_table, plot_cis, file = 'data/dat_agg2.Rdata')
+```
+
