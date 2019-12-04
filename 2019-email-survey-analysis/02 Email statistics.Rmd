@@ -110,19 +110,25 @@ As a point of comparison, I pulled a full class list from the database. Now, the
 If an individual opened either an initial email or a reminder, I counted that as an open; the same goes for clicks. Note that raw counts will be different, as non-alumni recipients (such as KSM staff) are filtered out, unlike in the summary statistics above.
 
 ```{r}
+# Summary table function
+email_summary_table <- function(data) {
+  data %>%
+    summarize(
+      n = length(ID_NUMBER)
+      , sent = sum(ifelse(n_sent > 0, 1, 0))
+      , bounced = sum(ifelse(n_bounced > 0, 1, 0))
+      , opened = sum(ifelse(n_opened_or_clicked > 0, 1, 0))
+      , clicked = sum(ifelse(n_clicks > 0, 1, 0))
+    ) %>% mutate(
+      sent_pct = scales::percent(sent / n)
+      , open_pct = scales::percent(opened / sent)
+      , clicked_pct = scales::percent(clicked / (opened + 1E-100))
+    )
+}
+```
+```{r}
 # Summary table metrics
-dat_agg %>%
-  group_by(email_group) %>%
-  summarize(
-    n = length(ID_NUMBER)
-    , sent = sum(ifelse(n_sent > 0, 1, 0))
-    , bounced = sum(ifelse(n_bounced > 0, 1, 0))
-    , opened = sum(ifelse(n_opened_or_clicked > 0, 1, 0))
-    , clicked = sum(ifelse(n_clicks > 0, 1, 0))
-  ) %>% mutate(
-    open_pct = scales::percent(opened / sent)
-    , clicked_pct = scales::percent(clicked / (opened + 1E-100))
-  )
+dat_agg %>% group_by(email_group) %>% email_summary_table()
 ```
 
 Drilling down into this None group:
@@ -149,21 +155,46 @@ dat_agg <- dat_agg %>% mutate(
 )
 ```
 ```{r}
-dat_agg %>%
-  group_by(email_group_filled) %>%
-  summarize(
-    n = length(ID_NUMBER)
-    , sent = sum(ifelse(n_sent > 0, 1, 0))
-    , bounced = sum(ifelse(n_bounced > 0, 1, 0))
-    , opened = sum(ifelse(n_opened_or_clicked > 0, 1, 0))
-    , clicked = sum(ifelse(n_clicks > 0, 1, 0))
-  ) %>% mutate(
-    sent_pct = scales::percent(sent / n)
-    , open_pct = scales::percent(opened / sent)
-    , clicked_pct = scales::percent(clicked / (opened + 1E-100))
-  )
+dat_agg %>% group_by(email_group_filled) %>% email_summary_table()
 ```
 
 It's possible that link tracking was not enabled for Financial Times and the captured clicks were to non-survey links.
 
 # Email address analysis
+
+Just because an email was received doesn't mean it went to the individual's inbox (spam filters) or or even to an account still being checked (old address). I'd like to look at opens as a function of email address status (per the database) and email update date.
+
+First, is the email sent to in iModules the same as the person's current preferred email address in the database?
+
+```{r}
+dat_agg %>% group_by(email_group_filled, same_email) %>% email_summary_table()
+```
+
+```{r}
+dat_agg %>%
+  ggplot(aes(x = email_group_filled, y = n_opened_or_clicked, color = same_email)) +
+  geom_boxplot()
+```
+
+There appears to be a strong main effect for `same_email == TRUE`. Also note that all bounces, and not sent, emails are ones that weren't sent to the preferred email address per the database.
+
+Other potentially important variables could be the email address status and date last updated.
+
+```{r, rows.print = 100}
+dat_agg %>% group_by(email_group_filled, send_email_status) %>% email_summary_table()
+```
+
+Again, note that emails not from the database have the worst performance (with a few exceptions due to expected small-sample variance).
+
+
+
+Plugging this all into a quick and simple model:
+
+```{r}
+dat_agg %>% glm(
+  ~ email_group_filled + same_email
+  , data = .
+  , family = binomial()
+)
+```
+
