@@ -21,13 +21,20 @@ library(lubridate)
 library(readxl)
 library(wranglR)
 library(knitr)
+library(splines)
+library(car)
+
+# Parameters -- edit if needed
+data_as_of <- ymd('20191202')
 
 # Set to FALSE to hide all code chunks when rendering the document
 opts_chunk$set(echo = FALSE)
-
+```
+```{r}
 # Load data from last time
 load('data/dat_agg.Rdata')
 ```
+
 
 # Background and definitions
 
@@ -111,7 +118,10 @@ If an individual opened either an initial email or a reminder, I counted that as
 
 ```{r}
 # Summary table function
-email_summary_table <- function(data) {
+email_summary_table <- function(data, table_output = TRUE) {
+  pct_format <- function(x, bool) {
+    ifelse(bool, scales::percent(x), x)
+  }
   data %>%
     summarize(
       n = length(ID_NUMBER)
@@ -120,10 +130,13 @@ email_summary_table <- function(data) {
       , opened = sum(ifelse(n_opened_or_clicked > 0, 1, 0))
       , clicked = sum(ifelse(n_clicks > 0, 1, 0))
     ) %>% mutate(
-      sent_pct = scales::percent(sent / n)
-      , open_pct = scales::percent(opened / sent)
-      , clicked_pct = scales::percent(clicked / (opened + 1E-100))
-    )
+      pcf = table_output
+      , sent_pct = pct_format(sent / n, pcf)
+      , open_pct = pct_format(opened / sent, pcf)
+      , clicked_pct = pct_format(clicked / (opened + 1E-100), pcf)
+    ) %>%
+    select(-pcf) %>%
+    return()
 }
 ```
 ```{r}
@@ -152,6 +165,15 @@ dat_agg <- dat_agg %>% mutate(
     , FIRST_MASTERS_YEAR == 2018 ~ 'Economist 2018 FT'
     , TRUE ~ 'None'
   ) %>% as.factor()
+  , 
+  # Add a version of email_group_filled with line breaks
+  email_group_filled_lb = email_group_filled %>%
+    fct_recode(
+      'Financial Times\n2016 EMBA' = 'Financial Times 2016 EMBA'
+      , 'Businessweek\n2013 FT' = 'Businessweek 2013 FT'
+      , 'Financial Times\n2016 FT' = 'Financial Times 2016 FT'
+      , 'Economist\n2018 FT' = 'Economist 2018 FT'
+    )
 )
 ```
 ```{r}
@@ -164,16 +186,42 @@ It's possible that link tracking was not enabled for Financial Times and the cap
 
 Just because an email was received doesn't mean it went to the individual's inbox (spam filters) or or even to an account still being checked (old address). I'd like to look at opens as a function of email address status (per the database) and email update date.
 
-First, is the email sent to in iModules the same as the person's current preferred email address in the database?
+First, is the email sent to in iModules the same as the person's current preferred email address in the CATracks database?
 
 ```{r}
 dat_agg %>% group_by(email_group_filled, same_email) %>% email_summary_table()
 ```
-
 ```{r}
-dat_agg %>%
-  ggplot(aes(x = email_group_filled, y = n_opened_or_clicked, color = same_email)) +
-  geom_boxplot()
+# Function to create nice CI plots
+plot_cis <- function(
+  data, xdat, ydat, ndat, colordat, ci_mult = 1.96
+  , title = '', xlab = '', ylab = '', collab = '', pd = .8, ci_width = .1
+) {
+  # Symbolic representation of data columns
+  xdat <- ensym(xdat)
+  ydat <- ensym(ydat)
+  ndat <- ensym(ndat)
+  colordat <- ensym(colordat)
+  # Create data frame
+  data %>% 
+    group_by(!!xdat, !!colordat) %>%
+    email_summary_table(FALSE) %>%
+    mutate(
+      sem = sqrt(!!ydat * (1 - !!ydat) / !!ndat)
+      , ci = sem * ci_mult
+    ) %>%
+    # Plot results
+    ggplot(aes(x = !!xdat, y = !!ydat, color = !!colordat)) +
+    geom_point(position = position_dodge(pd)) +
+    geom_errorbar(aes(ymin = !!ydat - ci, ymax = !!ydat + ci), position = position_dodge(pd), width = ci_width) +
+    labs(x = xlab, y = ylab, color = collab, title = title) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = .2), labels = scales::percent)
+}
+```
+```{r}
+dat_agg %>% plot_cis(
+  xdat = email_group_filled_lb, ydat = open_pct, ndat = sent, colordat = same_email
+  , title = 'Open rate based on use of preferred email with 95% CI', ylab = 'Open rate', collab = 'Used pref email')
 ```
 
 There appears to be a strong main effect for `same_email == TRUE`. Also note that all bounces, and not sent, emails are ones that weren't sent to the preferred email address per the database.
@@ -183,18 +231,105 @@ Other potentially important variables could be the email address status and date
 ```{r, rows.print = 100}
 dat_agg %>% group_by(email_group_filled, send_email_status) %>% email_summary_table()
 ```
+```{r, warning = FALSE}
+dat_agg %>% plot_cis(
+  xdat = email_group_filled_lb, ydat = open_pct, ndat = sent, colordat = send_email_status
+  , title = 'Open rate based on use of send email status with 95% CI', ylab = 'Open rate', collab = 'Send email status')
+```
 
-Again, note that emails not from the database have the worst performance (with a few exceptions due to expected small-sample variance).
+Here, NA corresponds to emails not from the database. Again, note that these emails have the worst performance (with one exception due to expected small-sample variance).
 
+Finally, consider open rate as a function of email age.
 
+```{r, warning = FALSE, message = FALSE}
+email_time_plot <- dat_agg %>%
+  mutate(
+    weeks_since_email = difftime(last_delivered_dt, STATUS_CHANGE_DATE, units = 'weeks') %>% as.numeric()
+    , any_open = ifelse(n_opened_or_clicked > 0, 1, 0)
+  ) %>%
+  ggplot(aes(x = weeks_since_email, y = any_open)) +
+  geom_point(aes(color = as.factor(any_open))) +
+  geom_smooth(method = 'lm', color = 'darkgreen') +
+  geom_smooth() +
+  scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
+  labs(
+    title = 'Email open rate as
+    f(email delivery date, email address status update date)'
+    , x = 'Weeks between email delivery date and last database preferred email status update'
+    , y = 'Any email opened'
+    , col = 'Any email opened'
+  )
+email_time_plot
+```
+
+This is actually pretty interesting -- there's an overall decreasing trend, with spikes around certain update times. I suspect a class year effect, so partitioning this out by email:
+
+```{r, fig.height = 12, fig.width = 8, warning = FALSE, message = FALSE}
+email_time_plot +
+  facet_grid(email_group_filled_lb ~ .) +
+  labs(title = '')
+```
+
+Interestingly, the peaks are within about the same time period, a little under 4 years before the last email was sent. Looking instead at the raw email update time data gives the following:
+
+```{r, warning = FALSE, message = FALSE}
+email_year_plot <- dat_agg %>%
+  mutate(
+    any_open = ifelse(n_opened_or_clicked > 0, 1, 0)
+    , STATUS_CHANGE_DATE = as.Date(STATUS_CHANGE_DATE)
+  ) %>%
+  ggplot(aes(x = STATUS_CHANGE_DATE, y = any_open)) +
+  geom_point(aes(color = as.factor(any_open))) +
+  geom_smooth(method = 'lm', color = 'darkgreen') +
+  geom_smooth() +
+  scale_x_date(date_breaks = '1 year', date_labels = '%Y') +
+  scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL) +
+  labs(
+    title = 'Email open rate as
+    f(email address status update date)'
+    , x = 'Date of last preferred email update'
+    , y = 'Any email opened'
+    , col = 'Any email opened'
+  ) +
+  theme(panel.grid.minor = element_line(linetype = 'dotted'))
+email_year_plot
+```
+
+```{r, fig.height = 12, fig.width = 8, warning = FALSE, message = FALSE}
+email_year_plot +
+  facet_grid(email_group_filled_lb ~ .) +
+  labs(title = '')
+```
+
+So around 4 years ago from summer 2015 to summer 2016 a bunch of good emails were captured, even from the class of 2013? Peculiar.
 
 Plugging this all into a quick and simple model:
 
 ```{r}
-dat_agg %>% glm(
-  ~ email_group_filled + same_email
-  , data = .
-  , family = binomial()
-)
+glm_opens <- dat_agg %>%
+  mutate(
+    any_open = ifelse(n_opened_or_clicked > 0, 1, 0)
+    , weeks_since_email = difftime(last_delivered_dt, STATUS_CHANGE_DATE, units = 'weeks') %>% as.numeric()
+    , send_email_status = case_when(
+      is.na(send_email_status) ~ 'NA'
+      , TRUE ~ as.character(send_email_status)
+    ) %>% as.factor()
+  ) %>%
+  glm(
+    any_open ~ email_group_filled + same_email + send_email_status + ns(weeks_since_email, df = 4)
+    , data = .
+    , family = binomial()
+  )
+```
+```{r}
+summary(glm_opens)
 ```
 
+Note that the reference factor levels were Businessweek; sending emails to a non-preferred address; and email status active.
+
+```{r}
+crPlots(glm_opens, terms = ~ email_group_filled)
+crPlots(glm_opens, terms = ~ same_email)
+crPlots(glm_opens, terms = ~ send_email_status)
+crPlots(glm_opens, terms = ~ ns(weeks_since_email, df = 4))
+```
