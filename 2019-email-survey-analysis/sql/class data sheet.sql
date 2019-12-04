@@ -53,8 +53,19 @@ Select
     As survey
   , Case When grads.id_number Is Not Null Then 'grads' End
     As grads
+  , de.primary_job_title
+  , de.primary_employer
+  , de.primary_job_source
+  , de.fld_of_work_desc
+  , de.business_city
+  , de.business_state
+  , de.business_country_desc
+  , de.business_date_modified
+  , de.employment_date_modified
 From ids
 Left Join survey
   On survey.id_number = ids.id_number
 Left Join grads
   On grads.id_number = ids.id_number
+Left Join v_datamart_entities de
+  On de.catracks_id = ids.id_number

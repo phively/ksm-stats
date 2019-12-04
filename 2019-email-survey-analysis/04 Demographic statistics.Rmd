@@ -1,0 +1,91 @@
+---
+title: "Demographic statistics"
+output:
+  html_notebook:
+    code_folding: hide
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+---
+
+<style>
+#header .btn-group {
+    display: none;
+}
+</style>
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+# Libraries
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(wranglR)
+library(knitr)
+library(splines)
+library(car)
+
+# Parameters -- edit if needed
+data_as_of <- ymd('20191202')
+
+# Set to FALSE to hide all code chunks when rendering the document
+opts_chunk$set(echo = FALSE)
+```
+```{r}
+# Load data from last time
+load('data/dat_agg3.Rdata')
+```
+
+# Goal
+
+```{r}
+# Function to replace NA with 0
+na0 <- function(x) {
+  ifelse(is.na(x), 0, x)
+}
+
+# Function to print stats by desired grouping variable
+summarize_grouping <- function(data) {
+  #colvar <- ensym(colvar)
+  data %>%
+  summarise(n = n()) %>%
+    spread(any_open, n) %>%
+    rename(noopen = `0`, open = `1`) %>%
+    mutate(
+      noopen = na0(noopen)
+      , open = na0(open)
+      , n = noopen + open
+      , open_rt = open / n
+      , open_pct = scales::percent(open / n)
+    ) %>% arrange(desc(n), desc(open_rt)) %>%
+    select(n, open, open_pct)
+}
+```
+
+
+Look into demographic information of people who received the survey emails -- are there patterns in terms of employment, location, etc.?
+
+Summarize by current (not at time of survey!) employment status:
+
+```{r, message = FALSE, rows.print = 20}
+dat_agg %>%
+  mutate(employment_in_catracks = !is.na(PRIMARY_EMPLOYER)) %>%
+  group_by(employment_in_catracks, any_open) %>%
+  summarize_grouping()
+```
+
+
+Summarize by industry:
+
+```{r, message = FALSE, rows.print = 20}
+dat_agg %>%
+  group_by(FLD_OF_WORK_DESC, any_open) %>%
+  summarize_grouping()
+```
+
+```{r, message = FALSE, rows.print = 20}
+dat_agg %>%
+  mutate(business_loc = ifelse(is.na(BUSINESS_STATE), BUSINESS_COUNTRY_DESC, paste0('USA-', BUSINESS_STATE))) %>%
+  group_by(business_loc, any_open) %>%
+  summarize_grouping()
+```
+
