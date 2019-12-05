@@ -147,6 +147,17 @@ dat_agg %>%
 
 Again, not very consistent, though the number of detractors overall is very small.
 
+Redoing the above chart with just full-time:
+
+```{r, fig.height = 7, fig.width = 8, rows.print = 100, warning = FALSE}
+dat_agg %>%
+  filter(email_group_filled != 'Financial Times 2016 EMBA') %>%
+  ggplot(aes(x = survey_nps_rescale, fill = factor(any_open, labels = c('Did not open', 'Opened')))) +
+  geom_histogram(bins = 10, alpha = .8) +
+  facet_grid(email_group_filled_lb ~ .) +
+  labs(title = 'Count of email opens by exit survey NPS', y = 'Count', x = 'NPS (rescaled)', fill = '')
+```
+
 # Network survey
 
 (Need to understand this data better - is 0 a score or how they coded missing values?)
