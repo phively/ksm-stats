@@ -89,3 +89,7 @@ dat_agg %>%
   summarize_grouping()
 ```
 
+```{r}
+# Export data from this step
+save(dat_agg, file = 'data/dat_agg4.Rdata')
+```

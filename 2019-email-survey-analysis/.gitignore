@@ -1,2 +1,6 @@
+# Ignore data files
 *.Rdata
 *.rdata
+
+# Output files to mask
+05 Compensation survey.nb.html

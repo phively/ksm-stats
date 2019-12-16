@@ -1,0 +1,183 @@
+---
+title: "Compensation survey"
+output:
+  html_notebook:
+    code_folding: hide
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+---
+
+<style>
+#header .btn-group {
+    display: none;
+}
+</style>
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+# Libraries
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(wranglR)
+library(knitr)
+library(splines)
+library(car)
+
+# Parameters -- edit if needed
+data_as_of <- ymd('20191202')
+
+# Set to FALSE to hide all code chunks when rendering the document
+opts_chunk$set(echo = FALSE)
+```
+```{r}
+# Load data from last time
+load('data/dat_agg4.Rdata')
+```
+
+# Goal
+
+Understand the distribution of recent graduate compensation from the exit survey and how it relates to the email survey results.
+
+# Compensation survey data
+
+```{r}
+# Load compensation data
+dat_comp <- read_xlsx(
+  path = 'data/2Y_CL2011-2018_PostMBACompensation.xlsx'
+  , sheet = 1
+) %>% mutate(
+  EmplID = as.numeric(EmplID)
+)
+
+# Load emplids
+emplids <- read_xlsx(path = 'data/ID to EMPLID conversion.xlsx', sheet = 1) %>%
+  mutate(
+    ID_NUMBER = as.numeric(CATRACKS_ID)
+    , EMPLID = as.numeric(EMPLID)
+  ) %>% select(-CATRACKS_ID)
+
+# Load degrees
+dat_degs <- read_xlsx(path = 'data/degree lookups.xlsx', sheet = 1)
+
+# Look up IDs and degrees
+dat_comp <- dat_comp %>%
+  left_join(emplids, by = c('EmplID' = 'EMPLID')) %>%
+  left_join(dat_degs %>% select(-ID_NUMBER), by = c('EmplID' = 'EMPLID')) %>%
+  # Fix data types
+  mutate(
+    FIRST_KSM_YEAR = as.numeric(FIRST_KSM_YEAR)
+    , FIRST_MASTERS_YEAR = as.numeric(FIRST_MASTERS_YEAR)
+    , PROGRAM = as.factor(PROGRAM)
+    , PROGRAM_GROUP = as.factor(PROGRAM_GROUP)
+    , ClassYear = as.factor(FIRST_MASTERS_YEAR)
+  )
+
+# Join to dat_agg
+dat_agg <- dat_agg %>%
+  left_join(
+    dat_comp %>% select(ID_NUMBER, BaseSalary, SignOn, Compensation)
+    , by = c('ID_NUMBER' = 'ID_NUMBER')
+  )
+```
+
+First check that `Compensation` = `BaseSalary` + `Signon` and how many map back to survey recipients.
+
+```{r}
+dat_comp %>%
+  mutate(
+    valid_totals = BaseSalary + SignOn == Compensation
+    , has_id = !is.na(ID_NUMBER)
+  ) %>%
+  select(valid_totals, has_id) %>%
+  summary()
+```
+
+Looks good.
+
+```{r}
+dat_comp %>% select(-EmplID, -ID_NUMBER, -FIRST_KSM_YEAR) %>% summary()
+```
+
+```{r}
+plot_comp_by_yr <- dat_comp %>%
+  ggplot(aes(x = BaseSalary, y = SignOn, color = ClassYear)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  geom_rug(position = position_jitter(width = 500, seed = 123)) +
+  # Reference line
+  geom_abline(slope = -1, intercept = mean(dat_comp$Compensation)) +
+  scale_x_continuous(breaks = seq(0, 1E6, by = 50E3), labels = scales::dollar, limits = c(0, NA), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 1E6, by = 20E3), labels = scales::dollar) +
+  labs(title = paste0(
+   'Base salary and signon bonus by individual response
+   (reference line is mean = '
+   , mean(dat_comp$Compensation) %>% scales::dollar()
+   , ')')
+   )
+
+print(plot_comp_by_yr)
+```
+
+```{r, fig.height = 12, fig.width = 8}
+plot_comp_by_yr +
+  facet_grid(ClassYear ~ .)
+```
+
+Quite noisy, though there is an association between `BaseSalary` and `SignOn`.
+
+Univariate densities:
+
+```{r}
+# Plotting function
+plot_univar <- function(data, varname, bw = 10E3) {
+  varname <- ensym(varname)
+  data %>%
+    ggplot(aes(x = !!varname, color = ClassYear)) +
+    geom_histogram(aes(fill = ClassYear), alpha = .1, binwidth = bw) +
+    geom_density(aes(y = bw * ..count..)) +
+    facet_grid(ClassYear ~ .) +
+    scale_x_continuous(labels = scales::dollar, breaks = seq(0, 1E6, by = 50E3)) +
+    labs(title = paste('Univariate', varname, 'distribution'))
+}
+```
+
+```{r, fig.height = 12, fig.width = 8}
+dat_comp %>% plot_univar(varname = BaseSalary)
+```
+
+```{r, fig.height = 12, fig.width = 8}
+dat_comp %>% plot_univar(varname = SignOn)
+```
+
+```{r, fig.height = 12, fig.width = 8}
+dat_comp %>% plot_univar(varname = Compensation)
+```
+
+Hypothesis: Compensation is bimodal, with distinct `SignOn > 0` and `SignOn == 0` groups.
+
+```{r}
+bw <- 10E3
+
+dat_comp_summary <- dat_comp %>%
+  mutate(AnySignon = factor(SignOn > 0)) %>%
+  group_by(AnySignon, ClassYear) %>%
+  summarise(mean = mean(Compensation))
+
+dat_comp %>%
+  mutate(AnySignon = factor(SignOn > 0)) %>%
+  ggplot(aes(x = Compensation, color = ClassYear)) +
+  geom_density(aes(y = bw * ..count..)) +
+  # Reference line
+  geom_vline(
+    data = dat_comp_summary
+    , aes(color = ClassYear, xintercept = mean)
+    , linetype = 'dashed'
+  ) +
+  facet_grid(AnySignon ~ .) +
+  scale_x_continuous(labels = scales::dollar, breaks = seq(0, 1E6, by = 50E3)) +
+  labs(title = 'Compensation by SignOn', y = 'count')
+```
+
+
+

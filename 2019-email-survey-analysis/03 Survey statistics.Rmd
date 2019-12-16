@@ -158,6 +158,14 @@ dat_agg %>%
   labs(title = 'Count of email opens by exit survey NPS', y = 'Count', x = 'NPS (rescaled)', fill = '')
 ```
 
+```{r}
+dat_agg %>%
+  mutate(exit_survey = factor(is.na(NPS))) %>%
+  group_by(email_group_filled, exit_survey) %>%
+  summarise(open_pct = mean(any_open))
+```
+
+
 # Network survey
 
 (Need to understand this data better - is 0 a score or how they coded missing values?)
