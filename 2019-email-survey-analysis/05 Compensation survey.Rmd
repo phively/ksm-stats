@@ -71,12 +71,13 @@ dat_comp <- dat_comp %>%
     , PROGRAM = as.factor(PROGRAM)
     , PROGRAM_GROUP = as.factor(PROGRAM_GROUP)
     , ClassYear = as.factor(FIRST_MASTERS_YEAR)
+    , AnySignon = factor(SignOn > 0)
   )
 
 # Join to dat_agg
 dat_agg <- dat_agg %>%
   left_join(
-    dat_comp %>% select(ID_NUMBER, BaseSalary, SignOn, Compensation)
+    dat_comp %>% select(ID_NUMBER, BaseSalary, SignOn, Compensation, AnySignon)
     , by = c('ID_NUMBER' = 'ID_NUMBER')
   )
 ```
@@ -104,7 +105,7 @@ plot_comp_by_yr <- dat_comp %>%
   ggplot(aes(x = BaseSalary, y = SignOn, color = ClassYear)) +
   geom_point() +
   geom_smooth(method = 'lm') +
-  geom_rug(position = position_jitter(width = 500, seed = 123)) +
+  geom_rug(position = position_jitter(width = 100, seed = 123)) +
   # Reference line
   geom_abline(slope = -1, intercept = mean(dat_comp$Compensation)) +
   scale_x_continuous(breaks = seq(0, 1E6, by = 50E3), labels = scales::dollar, limits = c(0, NA), expand = c(0, 0)) +
@@ -134,7 +135,7 @@ plot_univar <- function(data, varname, bw = 10E3) {
   varname <- ensym(varname)
   data %>%
     ggplot(aes(x = !!varname, color = ClassYear)) +
-    geom_histogram(aes(fill = ClassYear), alpha = .1, binwidth = bw) +
+    geom_histogram(aes(fill = ClassYear), alpha = .1, binwidth = bw, boundary = 0) +
     geom_density(aes(y = bw * ..count..)) +
     facet_grid(ClassYear ~ .) +
     scale_x_continuous(labels = scales::dollar, breaks = seq(0, 1E6, by = 50E3)) +
@@ -143,29 +144,29 @@ plot_univar <- function(data, varname, bw = 10E3) {
 ```
 
 ```{r, fig.height = 12, fig.width = 8}
-dat_comp %>% plot_univar(varname = BaseSalary)
-```
-
-```{r, fig.height = 12, fig.width = 8}
-dat_comp %>% plot_univar(varname = SignOn)
-```
-
-```{r, fig.height = 12, fig.width = 8}
 dat_comp %>% plot_univar(varname = Compensation)
 ```
 
 Hypothesis: Compensation is bimodal, with distinct `SignOn > 0` and `SignOn == 0` groups.
 
+```{r, fig.height = 12, fig.width = 8}
+dat_comp %>% plot_univar(varname = BaseSalary)
+```
+
+Base salary is also bimodal -- probably a result of employer industry.
+
+```{r, fig.height = 12, fig.width = 8}
+dat_comp %>% plot_univar(varname = SignOn)
+```
+
 ```{r}
 bw <- 10E3
 
 dat_comp_summary <- dat_comp %>%
-  mutate(AnySignon = factor(SignOn > 0)) %>%
   group_by(AnySignon, ClassYear) %>%
   summarise(mean = mean(Compensation))
 
 dat_comp %>%
-  mutate(AnySignon = factor(SignOn > 0)) %>%
   ggplot(aes(x = Compensation, color = ClassYear)) +
   geom_density(aes(y = bw * ..count..)) +
   # Reference line
@@ -179,5 +180,171 @@ dat_comp %>%
   labs(title = 'Compensation by SignOn', y = 'count')
 ```
 
+Note that each group is approximately symmetrical. Modeling compensation as a function of the various covariates.
+
+```{r}
+lm_comp <- dat_comp %>%
+  lm(
+    Compensation ~ ClassYear + PROGRAM + AnySignon
+    , data = .
+  )
+```
+```{r}
+lm_comp %>% summary()
+```
+
+```{r}
+plot(lm_comp)
+```
+
+```{r}
+termplot(lm_comp)
+```
+
+This works better than I thought it would! It'd be interesting to also look at `SignOn` as a function of e.g. industry but that would require some more data cleanup.
+
+# Email and compensation data
+
+```{r}
+dat_agg %>%
+  mutate(`Compensation (thousands)` = Compensation/1E3) %>%
+  select(`Compensation (thousands)`) %>%
+  summary()
+```
+
+So only `r {1 - sum(is.na(dat_agg$Compensation)) / nrow(dat_agg)} %>% scales::percent() %>% I()` of the email recipients have salary information available.
+
+```{r, warning = FALSE}
+plot_comp_by_pub <- dat_agg %>%
+  filter(!is.na(Compensation)) %>%
+  ggplot(aes(x = email_group_filled_lb, y = Compensation)) +
+  geom_point(position = position_jitter(width = .2, seed = 123), alpha = .1) +
+  geom_boxplot(alpha = .5) +
+  scale_y_continuous(labels = scales::dollar, breaks = seq(0, 1E6, by = 50E3)) +
+  labs(x = 'Email group', title = 'Compensation by Email Group')
+
+# Display results
+plot_comp_by_pub
+```
+
+```{r, warning = FALSE}
+# Break out by SignOn
+plot_comp_by_pub +
+  facet_grid(. ~ AnySignon) +
+  labs(title = 'Compensation by email group and AnySignon')
+```
+
+We see the same graduation year and sign-on effect as above.
+
+First look at open rates versus these two variables.
+
+```{r, warning = FALSE, message = FALSE}
+plot_opens_comp <- dat_agg %>%
+  ggplot(aes(x = Compensation, y = any_open)) +
+  geom_point(aes(color = as.factor(any_open))) +
+  geom_smooth(method = 'lm', color = 'darkgreen') +
+  geom_smooth(method = 'loess') +
+  scale_y_continuous(breaks = c(0, 1), minor_breaks = NULL)
+
+# Linear compensation
+plot_opens_comp +
+  scale_x_continuous(labels = scales::dollar, breaks = seq(0, 1E6, by = 50E3)) +
+  labs('Email open rate versus compensation')
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Log compensation
+plot_opens_comp +
+  scale_x_continuous(trans = 'log10', labels = scales::dollar, breaks = c(10E3, 50E3, 100E3, 150E3, 200E3, 250E3)) +
+  labs('Email open rate versus log10 compensation')
+```
+
+Transformation doesn't seem to make that much of a difference. Besides the (low) outliers the linear trend is pretty close.
+
+```{r, warning = FALSE}
+dat_agg %>%
+  group_by(AnySignon) %>%
+  summarise(
+    n = n()
+    , opens = sum(any_open)
+    , open_rate = scales::percent(opens / n)
+  )
+```
+
+# Emails versus compensation
+
+Repeat the previous email open analysis with compensation and signon as explanatory variables.
+
+```{r}
+glm_opens <- dat_agg %>%
+  glm(
+    any_open ~ email_group_filled + same_email + send_email_status + ns(weeks_since_email, df = 4) + Compensation + AnySignon
+    , data = .
+    , family = binomial()
+  )
 
 
+summary(glm_opens)
+```
+
+No effect - but recall that there is a lot of missing data.
+
+# Emails versus relative compensation
+
+Perhaps compensation is best understood relative to peers. As a quick approach, consider binning it into quintiles (and also treating NA as a separate factor level).
+
+```{r}
+CompAgg <- dat_agg %>%
+  filter(!is.na(Compensation)) %>%
+  group_by(email_group_filled) %>%
+  summarise(
+    Q1 = quantile(Compensation, probs = .2)
+    , Q2 = quantile(Compensation, probs = .4)
+    , Q3 = quantile(Compensation, probs = .6)
+    , Q4 = quantile(Compensation, probs = .8)
+    , Q5 = quantile(Compensation, probs = 1)
+  )
+
+dat_agg <- dat_agg %>%
+  left_join(CompAgg, by = c('email_group_filled' = 'email_group_filled'))
+```
+
+```{r}
+CompAgg %>%
+  mutate_if(is.numeric, function(x) {scales::dollar(x)})
+```
+
+```{r}
+dat_agg <- dat_agg %>%
+  mutate(
+    RelativeCompensation = case_when(
+      is.na(Compensation) ~ 'NA'
+      , Compensation <= Q1 ~ 'Q1'
+      , Compensation <= Q2 ~ 'Q2'
+      , Compensation <= Q3 ~ 'Q3'
+      , Compensation <= Q4 ~ 'Q4'
+      , Compensation <= Q5 ~ 'Q5'
+    ) %>% factor
+    , AnySignonNAs = ifelse(is.na(AnySignon), FALSE, AnySignon)
+  )
+```
+```{r, error = FALSE, warning = FALSE, fig.width = 8, fig.height = 12}
+# Check results
+dat_agg %>%
+  ggplot(aes(x = RelativeCompensation, y = Compensation, color = email_group_filled)) +
+  geom_boxplot() +
+  facet_grid(RelativeCompensation ~ email_group_filled)
+```
+
+```{r}
+glm_opens2 <- dat_agg %>%
+  glm(
+    any_open ~ email_group_filled + same_email + send_email_status + ns(weeks_since_email, df = 4) + RelativeCompensation + AnySignonNAs
+    , data = .
+    , family = binomial()
+  )
+
+summary(glm_opens2)
+```
+
+No relative compensation effect either.
