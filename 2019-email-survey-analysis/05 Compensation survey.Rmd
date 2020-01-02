@@ -328,12 +328,24 @@ dat_agg <- dat_agg %>%
     , AnySignonNAs = ifelse(is.na(AnySignon), FALSE, AnySignon)
   )
 ```
+```{r}
+dat_agg %>%
+  filter(!is.na(AnySignon)) %>%
+  ggplot(aes(x = RelativeCompensation, y = Compensation)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = scales::dollar, breaks = seq(0, 1E6, by = 50E3))
+```
+
+There's overlap because the quintiles are calculated on a per-class basis.
+
 ```{r, error = FALSE, warning = FALSE, fig.width = 8, fig.height = 12}
 # Check results
 dat_agg %>%
+  filter(email_group_filled != 'Financial Times 2016 EMBA') %>%
   ggplot(aes(x = RelativeCompensation, y = Compensation, color = email_group_filled)) +
   geom_boxplot() +
-  facet_grid(RelativeCompensation ~ email_group_filled)
+  scale_y_continuous(labels = scales::dollar, breaks = seq(0, 1E6, by = 50E3)) +
+  facet_grid(. ~ email_group_filled_lb)
 ```
 
 ```{r}
@@ -348,3 +360,32 @@ summary(glm_opens2)
 ```
 
 No relative compensation effect either.
+
+# Emails versus relative compensation - no NAs
+
+Try refitting the above model, but this time looking only at people for whom compensation data is available. I'm aslo dropping AnySignon.
+
+```{r}
+glm_opens3 <- dat_agg %>% filter(!is.na(AnySignon)) %>%
+  glm(
+    any_open ~ email_group_filled + same_email + send_email_status + ns(weeks_since_email, df = 4) + RelativeCompensation
+    , data = .
+    , family = binomial()
+  )
+
+summary(glm_opens3)
+```
+
+```{r}
+termplot(
+  glm_opens3
+  , terms = 'RelativeCompensation'
+  , partial.resid = TRUE
+  , main = 'Partial residual plot for RelativeCompensation'
+)
+```
+
+Now Q2 and Q4 pop out. But this could be over-interpreting the data.
+
+
+
